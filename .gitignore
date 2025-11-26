@@ -1,0 +1,8 @@
+/node_modules
+/.next
+/vendor
+/.env
+/storage
+/qdrant_data
+/ollama_data
+/mysql_data
