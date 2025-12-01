@@ -26,19 +26,16 @@ export default function ChatPage() {
 
   async function send() {
     if (!query.trim()) return;
-    const res = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL"}/api/query`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          query,
-          conversation_id: convId ?? undefined,
-          user_id: userId ?? undefined,
-          mode,
-        }),
-      },
-    );
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/query`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query,
+        conversation_id: convId ?? undefined,
+        user_id: userId ?? undefined,
+        mode,
+      }),
+    });
 
     const data = await res.json();
 
