@@ -19,7 +19,7 @@ export default function UploadPage() {
     setStatus("Uploading...");
     try {
       const res = await axios.post(
-        `${process.env.NEXT_PUBLIC_FILE_API_URL}/kb/ingest_many`,
+        `${process.env.NEXT_PUBLIC_FILE_API_URL}/api/upload`,
         fd,
         {
           headers: { "Content-Type": "multipart/form-data" },
