@@ -27,7 +27,8 @@ services:
     ports:
       - "6333:6333"
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:6333/ready || exit 1"]
+      test:
+        ["CMD-SHELL", "curl -sf http://localhost:6333/collections || exit 1"]
       interval: 20s
       timeout: 10s
       retries: 20
