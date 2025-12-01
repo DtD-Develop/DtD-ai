@@ -122,7 +122,7 @@ services:
     container_name: next_frontend
     restart: unless-stopped
     environment:
-      - NEXT_PUBLIC_API_URL=http://34.177.85.88:8000
+      - NEXT_PUBLIC_API_URL=http://nginx
     ports:
       - "3000:3000"
     networks:
