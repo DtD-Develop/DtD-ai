@@ -1,4 +1,4 @@
-("use client");
+"use client";
 import { useEffect, useState } from "react";
 
 type Mode = "test" | "train" | "prod";
@@ -18,9 +18,7 @@ export default function ChatPage() {
 
     let savedUser = localStorage.getItem("user_id");
     if (!savedUser) {
-      // สำหรับ dev: random id ถ้าไม่มี
-      savedUser =
-        (crypto as any).randomUUID?.() ?? `user_${Date.now().toString()}`;
+      savedUser = crypto.randomUUID?.() ?? `user_${Date.now()}`;
       localStorage.setItem("user_id", savedUser);
     }
     setUserId(savedUser);
@@ -53,7 +51,7 @@ export default function ChatPage() {
     setMessages((prev) => [
       ...prev,
       { role: "user", text: query },
-      { role: "assistant", text: data.answer },
+      { role: "assistant", text: data.answer ?? "(no answer)" },
     ]);
     setQuery("");
   }
