@@ -27,7 +27,14 @@ services:
     ports:
       - "6333:6333"
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:6333/dashboard"]
+      test:
+        [
+          "CMD",
+          "grpcurl",
+          "-plaintext",
+          "localhost:6334",
+          "qdrant.Health/Check",
+        ]
       interval: 10s
       timeout: 5s
       retries: 20
