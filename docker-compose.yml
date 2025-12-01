@@ -31,6 +31,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 20
+      start_period: 60s
+    environment:
+      QDRANT__STORAGE__WAL__WAL_SIZE: "200000000"
+      QDRANT__SERVICE__GRPC_PORT: 6334
     volumes:
       - qdrant_data:/qdrant/storage
     networks:
