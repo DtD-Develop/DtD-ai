@@ -14,60 +14,88 @@ class UploadController
         }
 
         $stored = null;
-        $tags = $request->input("tags", []);
 
+        // รับ tags ทั้งแบบ array และ comma-separated string
+        $tags = $request->input("tags", []);
         if (is_string($tags)) {
             $tags = array_filter(array_map("trim", explode(",", $tags)));
         }
 
         /**
-         * Format A: Multipart file upload
+         * A: files[] (multiple upload)
+         */
+        if ($request->hasFile("files")) {
+            $files = $request->file("files");
+
+            if (!is_array($files)) {
+                $files = [$files];
+            }
+
+            $paths = [];
+            foreach ($files as $file) {
+                $fileName = $file->getClientOriginalName();
+                $path = $uploadDir . "/" . $fileName;
+                $file->move($uploadDir, $fileName);
+                $paths[] = $path;
+
+                // ส่งเข้า Queue ต่อไฟล์แต่ละไฟล์
+                ProcessUploadJob::dispatch($path, [
+                    "tags" => $tags,
+                ]);
+            }
+
+            return response()->json([
+                "status" => "queued",
+                "files" => $paths,
+                "tags" => $tags,
+            ]);
+        }
+
+        /**
+         * B: file (single upload)
          */
         if ($request->hasFile("file")) {
             $file = $request->file("file");
-            $fileName = $file->getClientOriginalName();
+            $stored = $uploadDir . "/" . $file->getClientOriginalName();
+            $file->move($uploadDir, $file->getClientOriginalName());
 
-            $stored = $uploadDir . "/" . $fileName;
-            $file->move($uploadDir, $fileName);
+            ProcessUploadJob::dispatch($stored, [
+                "tags" => $tags,
+            ]);
+
+            return response()->json([
+                "status" => "queued",
+                "path" => $stored,
+                "tags" => $tags,
+            ]);
         }
-        /**
-         * Format B: Base64 JSON upload
-         */ elseif ($request->filled("base64")) {
-            $fileName = $request->input("file_name", "uploaded.txt");
-            $base64 = $request->input("base64");
 
-            $binaryData = base64_decode($base64);
+        /**
+         * C: Base64 JSON upload
+         */
+        if ($request->filled("base64")) {
+            $fileName = $request->input("file_name", "uploaded.txt");
+            $binaryData = base64_decode($request->base64);
+
             if ($binaryData === false) {
                 return response()->json(["error" => "Invalid base64"], 400);
             }
 
             $stored = $uploadDir . "/" . $fileName;
             file_put_contents($stored, $binaryData);
-        } else {
-            return response()->json(["error" => "no file provided"], 400);
-        }
 
-        // --- Trigger ingestion immediately ---
-        try {
             ProcessUploadJob::dispatch($stored, [
                 "tags" => $tags,
             ]);
-        } catch (\Exception $e) {
-            return response()->json(
-                [
-                    "status" => "uploaded",
-                    "queued" => false,
-                    "error" => $e->getMessage(),
-                ],
-                500,
-            );
+
+            return response()->json([
+                "status" => "queued",
+                "path" => $stored,
+                "tags" => $tags,
+            ]);
         }
 
-        return response()->json([
-            "status" => "queued",
-            "path" => $stored,
-            "tags" => $tags,
-        ]);
+        return response()->json(["error" => "no file provided"], 400);
     }
 
     public function train(Request $request)
