@@ -1,6 +1,15 @@
 <?php
+
+namespace App\Jobs;
+
 use GuzzleHttp\Client;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
 
 class ProcessUploadJob implements ShouldQueue
 {
@@ -27,20 +36,15 @@ class ProcessUploadJob implements ShouldQueue
         $qdrant = new Client(["base_uri" => $qdrantUrl, "timeout" => 30]);
         $ollama = new Client(["base_uri" => $ollamaUrl, "timeout" => 120]);
 
-        // 📝 1) Extract text
         $text = $this->extractText($this->filePath);
         if (!$text) {
             \Log::error("No content extracted from: {$this->filePath}");
             return;
         }
 
-        // 🔁 2) Chunking
         $chunks = $this->chunkText($text);
-
-        // 📌 doc id for grouping
         $docId = Str::uuid()->toString();
 
-        // 🔥 3) Embedding + Upsert Qdrant
         foreach ($chunks as $idx => $chunk) {
             $vec = $this->embedText($ollama, $embedModel, $chunk);
 
@@ -63,7 +67,6 @@ class ProcessUploadJob implements ShouldQueue
             ]);
         }
 
-        // 🛎 4) Notify webhook
         Http::post(url("/api/train-webhook"), [
             "status" => "completed",
             "fileName" => basename($this->filePath),
@@ -88,34 +91,6 @@ class ProcessUploadJob implements ShouldQueue
 
     private function extractText(string $path): ?string
     {
-        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
-
-        if (in_array($ext, ["txt", "md"])) {
-            return file_get_contents($path);
-        }
-
-        if ($ext === "pdf") {
-            return shell_exec(
-                "pdftotext -layout " . escapeshellarg($path) . " -",
-            );
-        }
-
-        if (
-            ($ext === "doc" || $ext === "docx") &&
-            shell_exec("which soffice")
-        ) {
-            $tmp = storage_path("app/tmp/" . uniqid() . ".pdf");
-            shell_exec(
-                "soffice --headless --convert-to pdf " .
-                    escapeshellarg($path) .
-                    " --outdir " .
-                    escapeshellarg(dirname($tmp)),
-            );
-            return shell_exec(
-                "pdftotext -layout " . escapeshellarg($tmp) . " -",
-            );
-        }
-
         return file_get_contents($path);
     }
 

@@ -69,10 +69,34 @@ services:
     container_name: laravel_backend
     restart: unless-stopped
     environment:
-      - DB_HOST=mysql
-      - DB_DATABASE=ai_platform
-      - DB_USERNAME=aiuser
-      - DB_PASSWORD=aipassword
+      APP_NAME: "AIPlatform"
+      APP_ENV: "production"
+      APP_KEY: "base64:j0jBjc7JuzZ795fD6jmY0aWdtVwTerCf8Q7zTSOh++M="
+      APP_DEBUG: "false"
+      APP_URL: "http://nginx"
+
+      DB_CONNECTION: "mysql"
+      DB_HOST: "dtd-ai-mysql-1"
+      DB_PORT: "3306"
+      DB_DATABASE: "ai_platform"
+      DB_USERNAME: "aiuser"
+      DB_PASSWORD: "aipassword"
+
+      QUEUE_CONNECTION: "redis"
+      REDIS_CLIENT: predis
+      REDIS_HOST: redis
+      REDIS_PASSWORD: null
+      REDIS_PORT: 6379
+
+      QDRANT_URL: "http://qdrant:6333"
+      OLLAMA_URL: "http://ollama:11434"
+      OLLAMA_MODEL: "llama3.1:8b"
+
+      INGEST_URL: "http://ingest_service:8001"
+      INGEST_SERVICE_URL: "http://ingest_service:8001/process"
+
+      QDRANT_COLLECTION: "company_kb"
+      CHAT_COLLECTION: "chat_messages"
     volumes:
       - ./backend:/var/www/html
     depends_on:
