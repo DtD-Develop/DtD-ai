@@ -119,10 +119,15 @@ services:
   frontend:
     build:
       context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: "http://34.177.85.88:8000"
+        NEXT_PUBLIC_FILE_API_URL: "http://34.177.85.88:8001"
     container_name: next_frontend
     restart: unless-stopped
     environment:
-      - NEXT_PUBLIC_API_URL=http://nginx
+      - NEXT_PUBLIC_API_URL=http://34.177.85.88:8000
+      - NEXT_PUBLIC_FILE_API_URL=http://34.177.85.88:8001
     ports:
       - "3000:3000"
     networks:

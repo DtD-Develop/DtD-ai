@@ -1,31 +1,57 @@
-'use client'
-import React, { useState } from 'react'
-import axios from 'axios'
+"use client";
+import React, { useState } from "react";
+import axios from "axios";
 
 export default function UploadPage() {
-  const [file, setFile] = useState(null)
-  const [status, setStatus] = useState('')
+  const [files, setFiles] = useState<FileList | null>(null);
+  const [tags, setTags] = useState("");
+  const [status, setStatus] = useState("");
 
   async function submit() {
-    if (!file) return
-    const fd = new FormData()
-    fd.append('file', file)
-    setStatus('Uploading...')
+    if (!files || files.length === 0) return;
+
+    const fd = new FormData();
+    for (let i = 0; i < files.length; i++) {
+      fd.append("files", files[i]);
+    }
+    if (tags.trim()) fd.append("tags", tags);
+
+    setStatus("Uploading...");
     try {
-      const res = await axios.post(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/api/upload`, fd, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-      })
-      setStatus(JSON.stringify(res.data))
-    } catch (e) {
-      setStatus('Error: ' + (e.message || e))
+      const res = await axios.post(
+        `${process.env.NEXT_PUBLIC_FILE_API_URL}/kb/ingest_many`,
+        fd,
+        {
+          headers: { "Content-Type": "multipart/form-data" },
+        },
+      );
+      setStatus(JSON.stringify(res.data, null, 2));
+    } catch (e: any) {
+      setStatus("Error: " + (e.response?.data?.detail || e.message));
     }
   }
 
   return (
-    <div>
-      <input type="file" onChange={e => setFile(e.target.files?.[0] || null)} />
-      <button onClick={submit} style={{ marginLeft: 8 }}>Upload</button>
-      <div style={{ marginTop: 12 }}>{status}</div>
+    <div style={{ padding: 20 }}>
+      <h2>Upload Knowledge Base</h2>
+      <input type="file" multiple onChange={(e) => setFiles(e.target.files)} />
+
+      <div style={{ marginTop: 10 }}>
+        <label>Tags (comma separated):</label>
+        <input
+          type="text"
+          placeholder="finance,policy,product"
+          value={tags}
+          onChange={(e) => setTags(e.target.value)}
+          style={{ width: "100%", padding: 8 }}
+        />
+      </div>
+
+      <button onClick={submit} style={{ marginTop: 12, padding: "8px 16px" }}>
+        Upload
+      </button>
+
+      <pre style={{ marginTop: 12, whiteSpace: "pre-wrap" }}>{status}</pre>
     </div>
-  )
+  );
 }

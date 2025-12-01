@@ -1,5 +1,14 @@
 FROM node:18-alpine AS builder
 WORKDIR /app
+
+# Generate runtime env for build
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_FILE_API_URL
+
+# Write .env.production.local dynamically
+RUN echo "NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}" > .env.production.local \
+  && echo "NEXT_PUBLIC_FILE_API_URL=${NEXT_PUBLIC_FILE_API_URL}" >> .env.production.local
+
 COPY package.json package-lock.json* ./
 RUN npm install --legacy-peer-deps
 COPY . .

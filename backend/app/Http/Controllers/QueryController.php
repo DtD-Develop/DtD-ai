@@ -228,9 +228,35 @@ class QueryController
         $kbCitationsText = implode("\n", $kbCitations);
         $chatContextText = implode("\n", $chatSnippets);
 
+        if (empty($kbContexts)) {
+            // fallback greeting or normal chat
+            $fallbackRes = $ollamaClient->post("/api/generate", [
+                "json" => [
+                    "model" => $ollamaModel,
+                    "prompt" =>
+                        "ตอบคำถามต่อไปนี้เป็นธรรมชาติและสุภาพในภาษาเดียวกับคำถาม:\n\n" .
+                        "Question:\n{$q}\n",
+                    "stream" => false,
+                    "keep_alive" => "15m",
+                    "options" => [
+                        "num_predict" => 256,
+                        "temperature" => 0.8,
+                        "top_p" => 0.9,
+                    ],
+                ],
+            ]);
+            $ollamaRes = json_decode((string) $fallbackRes->getBody(), true);
+            $answer = $ollamaRes["response"] ?? "ฉันสามารถช่วยอะไรได้บ้าง?";
+
+            return response()->json([
+                "answer" => $answer,
+                "conversation_id" => $conversationId,
+            ]);
+        }
+
         $prompt =
             "You are a precise assistant. STRICTLY follow the rules:\n" .
-            "1) Use ONLY information from KB Context to answer. If not found, say 'ไม่พบข้อมูลในเอกสาร'.\n" .
+            "1) Prefer KB Context. If KB Context does not contain the needed info, answer naturally without mentioning the KB.\n" .
             "2) If Chat Memory conflicts with KB Context, IGNORE Chat Memory and prefer KB Context.\n" .
             "3) Include citations like [k1], [k2] where applicable.\n" .
             "4) Answer in the same language as the question. Keep it concise.\n\n" .
