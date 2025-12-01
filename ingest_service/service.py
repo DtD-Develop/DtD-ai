@@ -168,6 +168,8 @@ def embed(req: EmbedRequest):
 # ---------- Chat APIs ----------
 class ChatUpsertRequest(BaseModel):
     conversation_id: str
+    user_id: Optional[str] = None  # แยกตาม user
+    mode: str = "test"  # "test" | "train" | "prod"
     role: str  # "user" | "assistant" | "system"
     text: str
     timestamp: Optional[float] = None
@@ -185,6 +187,8 @@ def chat_upsert(req: ChatUpsertRequest):
         "vector": v.tolist(),
         "payload": {
             "conversation_id": req.conversation_id,
+            "user_id": req.user_id,
+            "mode": req.mode,
             "role": req.role,
             "text": req.text,
             "timestamp": ts,
@@ -195,7 +199,9 @@ def chat_upsert(req: ChatUpsertRequest):
 
 
 class ChatSearchRequest(BaseModel):
-    conversation_id: str
+    conversation_id: Optional[str] = None
+    user_id: Optional[str] = None
+    mode: Optional[str] = None  # ถ้าอยากดึงเฉพาะ "test" หรือ "train"
     query: str
     limit: int = 5
 
@@ -206,14 +212,34 @@ def chat_search(req: ChatSearchRequest):
     dim = len(qv)
     ensure_collection(CHAT_COLLECTION, dim)
 
-    qfilter = Filter(
-        must=[
+    must = []
+
+    if req.conversation_id:
+        must.append(
             FieldCondition(
                 key="conversation_id",
                 match=MatchValue(value=req.conversation_id),
             )
-        ]
-    )
+        )
+
+    if req.user_id:
+        must.append(
+            FieldCondition(
+                key="user_id",
+                match=MatchValue(value=req.user_id),
+            )
+        )
+
+    if req.mode:
+        must.append(
+            FieldCondition(
+                key="mode",
+                match=MatchValue(value=req.mode),
+            )
+        )
+
+    qfilter = Filter(must=must) if must else None
+
     hits = client.search(
         collection_name=CHAT_COLLECTION,
         query_vector=qv.tolist(),
@@ -233,25 +259,48 @@ def chat_search(req: ChatSearchRequest):
 
 
 class ChatRecentRequest(BaseModel):
-    conversation_id: str
+    conversation_id: Optional[str] = None
+    user_id: Optional[str] = None
+    mode: Optional[str] = None
     limit: int = 8
 
 
 @app.post("/chat/recent")
 def chat_recent(req: ChatRecentRequest):
+    must = []
+
+    if req.conversation_id:
+        must.append(
+            FieldCondition(
+                key="conversation_id",
+                match=MatchValue(value=req.conversation_id),
+            )
+        )
+
+    if req.user_id:
+        must.append(
+            FieldCondition(
+                key="user_id",
+                match=MatchValue(value=req.user_id),
+            )
+        )
+
+    if req.mode:
+        must.append(
+            FieldCondition(
+                key="mode",
+                match=MatchValue(value=req.mode),
+            )
+        )
+
+    scroll_filter = Filter(must=must) if must else None
+
     all_points = []
     next_page = None
     while True:
         resp = client.scroll(
             collection_name=CHAT_COLLECTION,
-            scroll_filter=Filter(
-                must=[
-                    FieldCondition(
-                        key="conversation_id",
-                        match=MatchValue(value=req.conversation_id),
-                    )
-                ]
-            ),
+            scroll_filter=scroll_filter,
             limit=200,
             with_payload=True,
             with_vectors=False,

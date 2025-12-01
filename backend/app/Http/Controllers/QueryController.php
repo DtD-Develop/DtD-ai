@@ -11,6 +11,9 @@ class QueryController
         $conversationId =
             $request->input("conversation_id") ?: bin2hex(random_bytes(16));
 
+        $mode = $request->input("mode", "test"); // "test" | "train" | "prod"
+        $userId = $request->input("user_id"); // string หรือ null
+
         // ฟิลเตอร์ KB
         $sourceFilter = $request->input("source"); // string
         $sources = $request->input("sources", []); // array<string>
@@ -172,11 +175,13 @@ class QueryController
 
         // 3) Chat memory (semantic + recent)
         $chatSnippets = [];
-        if ($queryVector) {
+        if ($mode !== "prod" && $queryVector) {
             try {
                 $chatRes = $ingestClient->post("/chat/search", [
                     "json" => [
                         "conversation_id" => $conversationId,
+                        "user_id" => $userId,
+                        "mode" => $mode,
                         "query" => $q,
                         "limit" => 6,
                     ],
@@ -193,22 +198,29 @@ class QueryController
                 \Log::warning("chat/search failed: " . $e->getMessage());
             }
         }
-        try {
-            $recentRes = $ingestClient->post("/chat/recent", [
-                "json" => ["conversation_id" => $conversationId, "limit" => 8],
-            ]);
-            $recentJson = json_decode((string) $recentRes->getBody(), true);
-            foreach ($recentJson["results"] ?? [] as $item) {
-                $p = $item["payload"] ?? [];
-                if (isset($p["role"], $p["text"])) {
-                    $line = strtoupper($p["role"]) . ": " . $p["text"];
-                    if (!in_array($line, $chatSnippets)) {
-                        $chatSnippets[] = $line;
+        if ($mode !== "prod") {
+            try {
+                $recentRes = $ingestClient->post("/chat/recent", [
+                    "json" => [
+                        "conversation_id" => $conversationId,
+                        "user_id" => $userId,
+                        "mode" => $mode,
+                        "limit" => 8,
+                    ],
+                ]);
+                $recentJson = json_decode((string) $recentRes->getBody(), true);
+                foreach ($recentJson["results"] ?? [] as $item) {
+                    $p = $item["payload"] ?? [];
+                    if (isset($p["role"], $p["text"])) {
+                        $line = strtoupper($p["role"]) . ": " . $p["text"];
+                        if (!in_array($line, $chatSnippets)) {
+                            $chatSnippets[] = $line;
+                        }
                     }
                 }
+            } catch (\Exception $e) {
+                \Log::warning("chat/recent failed: " . $e->getMessage());
             }
-        } catch (\Exception $e) {
-            \Log::warning("chat/recent failed: " . $e->getMessage());
         }
 
         // 4) Prompt เข้มงวด
@@ -253,25 +265,31 @@ class QueryController
         }
 
         // 6) Save chat
-        try {
-            $ingestClient->post("/chat/upsert", [
-                "json" => [
-                    "conversation_id" => $conversationId,
-                    "role" => "user",
-                    "text" => $q,
-                ],
-            ]);
-        } catch (\Exception $e) {
-        }
-        try {
-            $ingestClient->post("/chat/upsert", [
-                "json" => [
-                    "conversation_id" => $conversationId,
-                    "role" => "assistant",
-                    "text" => $answer,
-                ],
-            ]);
-        } catch (\Exception $e) {
+        if ($mode !== "prod") {
+            try {
+                $ingestClient->post("/chat/upsert", [
+                    "json" => [
+                        "conversation_id" => $conversationId,
+                        "user_id" => $userId,
+                        "mode" => $mode,
+                        "role" => "user",
+                        "text" => $q,
+                    ],
+                ]);
+            } catch (\Exception $e) {
+            }
+            try {
+                $ingestClient->post("/chat/upsert", [
+                    "json" => [
+                        "conversation_id" => $conversationId,
+                        "user_id" => $userId,
+                        "mode" => $mode,
+                        "role" => "assistant",
+                        "text" => $answer,
+                    ],
+                ]);
+            } catch (\Exception $e) {
+            }
         }
 
         return response()->json([

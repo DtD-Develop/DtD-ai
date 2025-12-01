@@ -152,8 +152,6 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
-    volumes:
-      - ./backend:/var/www/html
     depends_on:
       - qdrant
       - ollama
@@ -170,8 +168,6 @@ services:
       dockerfile: Dockerfile
     command: ["php", "artisan", "horizon"]
     working_dir: /var/www/html
-    volumes:
-      - ./backend:/var/www/html
     depends_on:
       - backend
       - redis
