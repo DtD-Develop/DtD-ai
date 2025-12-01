@@ -26,9 +26,8 @@ export default function ChatPage() {
 
   async function send() {
     if (!query.trim()) return;
-
     const res = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}/api/query`,
+      `${process.env.NEXT_PUBLIC_API_URL"}/api/query`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
