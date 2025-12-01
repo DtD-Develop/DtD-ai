@@ -10,15 +10,11 @@ services:
       MYSQL_PASSWORD: aipassword
     volumes:
       - mysql_data:/var/lib/mysql
-    ports:
-      - "3306:3306"
     networks:
       - app-network
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "6379:6379"
     volumes:
       - redis_data:/data
     networks:
@@ -31,10 +27,10 @@ services:
     ports:
       - "6333:6333"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:6333/"]
+      test: ["CMD", "curl", "-f", "http://localhost:6333/ready"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
     volumes:
       - qdrant_data:/qdrant/storage
     networks:
@@ -51,146 +47,91 @@ services:
         reservations:
           devices:
             - capabilities: ["gpu"]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/version"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
     volumes:
       - ollama_data:/root/.ollama
-    networks:
-      - app-network
-
-  ollama-init:
-    image: ollama/ollama:latest
-    depends_on:
-      - ollama
-    environment:
-      - OLLAMA_HOST=http://ollama:11434
-      - OLLAMA_MODEL=llama3.1:8b
-    entrypoint: ["/bin/sh", "-lc"]
-    command: >
-      "
-      echo 'Waiting for Ollama API...';
-      until ollama list >/dev/null 2>&1; do sleep 1; done;
-      echo 'Pulling model' ${OLLAMA_MODEL};
-      ollama pull $${OLLAMA_MODEL} || exit 1;
-      echo 'Model pulled';
-      "
-    restart: "no"
-    networks:
-      - app-network
-
-  ollama-warmup:
-    image: curlimages/curl:latest
-    depends_on:
-      - ollama
-    environment:
-      - OLLAMA_MODEL=llama3.1:8b
-    entrypoint: ["/bin/sh", "-lc"]
-    command: >
-      '
-      echo "Waiting Ollama...";
-      until curl -s http://ollama:11434/api/tags >/dev/null; do sleep 1; done;
-      echo "Warming up model ${OLLAMA_MODEL}";
-      curl -s http://ollama:11434/api/generate
-        -H "Content-Type: application/json"
-        -d "{\"model\":\"${OLLAMA_MODEL}\",\"prompt\":\"warmup\",\"stream\":false,\"keep_alive\":\"30m\",\"options\":{\"num_predict\":1}}";
-      echo "Warmup done";
-      '
-    restart: "no"
     networks:
       - app-network
 
   ingest_service:
     build:
       context: ./ingest_service
-      dockerfile: Dockerfile
     container_name: ingest_service
+    restart: unless-stopped
     environment:
       - QDRANT_URL=http://qdrant:6333
       - OLLAMA_URL=http://ollama:11434
-      - EMBED_MODEL=nomic-embed-text
-      - QDRANT_COLLECTION=company_kb
-      - CHAT_COLLECTION=chat_messages
-    volumes:
-      - ./ingest_service/data:/data
     ports:
       - "8001:8001"
     depends_on:
-      - qdrant
-    networks:
-      - app-network
-
-  n8n:
-    image: n8nio/n8n:latest
-    container_name: n8n
-    restart: unless-stopped
-    ports:
-      - "5678:5678"
-    environment:
-      - GENERIC_TIMEZONE=Asia/Bangkok
-      - N8N_HOST=localhost
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=http
-      - N8N_BASIC_AUTH_ACTIVE=true
-      - N8N_BASIC_AUTH_USER=admin
-      - N8N_BASIC_AUTH_PASSWORD=change-this-strong-password
-    volumes:
-      - n8n_data:/home/node/.n8n
-    depends_on:
-      - ingest_service
-      - backend
+      qdrant:
+        condition: service_healthy
+      ollama:
+        condition: service_started
     networks:
       - app-network
 
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
     container_name: laravel_backend
     restart: unless-stopped
-    ports:
-      - "8000:8000"
+    environment:
+      - DB_HOST=mysql
+      - DB_DATABASE=ai_platform
+      - DB_USERNAME=aiuser
+      - DB_PASSWORD=aipassword
+    volumes:
+      - ./backend:/var/www/html
     depends_on:
-      - qdrant
-      - ollama
-      - ollama-init
-      - mysql
-      - redis
-      - ingest_service
+      mysql:
+        condition: service_started
+      qdrant:
+        condition: service_healthy
+      ingest_service:
+        condition: service_started
+    networks:
+      - app-network
+
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    restart: unless-stopped
+    ports:
+      - "8000:80"
+    volumes:
+      - ./backend:/var/www/html
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - backend
     networks:
       - app-network
 
   horizon:
     build:
       context: ./backend
-      dockerfile: Dockerfile
     command: ["php", "artisan", "horizon"]
     working_dir: /var/www/html
+    restart: unless-stopped
     depends_on:
       - backend
       - redis
-    restart: unless-stopped
     networks:
       - app-network
 
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
     container_name: next_frontend
     restart: unless-stopped
+    environment:
+      - NEXT_PUBLIC_API_URL=http://34.177.85.88:8000
     ports:
       - "3000:3000"
-    environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
     networks:
       - app-network
 
 networks:
   app-network:
-    driver: bridge
 
 volumes:
   mysql_data:

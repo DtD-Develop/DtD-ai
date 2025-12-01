@@ -10,3 +10,7 @@ Route::post("/train", [UploadController::class, "train"]);
 Route::post("/query", [QueryController::class, "query"]);
 
 Route::post("/train-webhook", [TrainWebhookController::class, "handle"]);
+
+Route::get("/health", function () {
+    return response()->json(["status" => "ok"]);
+});
