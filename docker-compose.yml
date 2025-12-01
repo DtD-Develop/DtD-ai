@@ -126,8 +126,7 @@ services:
   horizon:
     build:
       context: ./backend
-    command: ["php", "artisan", "horizon"]
-    working_dir: /var/www/html
+    command: php artisan horizon
     restart: unless-stopped
     depends_on:
       - backend
