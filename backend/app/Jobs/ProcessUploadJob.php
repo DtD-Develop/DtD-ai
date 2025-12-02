@@ -2,101 +2,107 @@
 
 namespace App\Jobs;
 
-use GuzzleHttp\Client;
-use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Str;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
+use App\Models\Document;
+use App\Models\DocumentChunk;
+use Exception;
 
 class ProcessUploadJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    protected string $filePath;
-    protected string $source;
-    protected array $tags;
+    protected $filePath;
+    protected $tags;
 
-    public function __construct($filePath, $meta = [])
+    public function __construct($filePath, $tags = [])
     {
         $this->filePath = $filePath;
-        $this->source = $meta["source"] ?? "upload";
-        $this->tags = $meta["tags"] ?? [];
+        $this->tags = $tags;
     }
 
     public function handle()
     {
-        $qdrantUrl = env("QDRANT_URL", "http://qdrant:6333");
-        $qdrantCollection = env("QDRANT_COLLECTION", "company_kb");
-        $ollamaUrl = env("OLLAMA_URL", "http://ollama:11434");
-        $embedModel = env("EMBED_MODEL", "nomic-embed-text");
+        $content = Storage::get($this->filePath);
+        $fileName = basename($this->filePath);
 
-        $qdrant = new Client(["base_uri" => $qdrantUrl, "timeout" => 30]);
-        $ollama = new Client(["base_uri" => $ollamaUrl, "timeout" => 120]);
+        // Save document meta
+        $document = Document::create([
+            "name" => $fileName,
+            "path" => $this->filePath,
+            "tags" => $this->tags,
+        ]);
 
-        $text = $this->extractText($this->filePath);
-        if (!$text) {
-            \Log::error("No content extracted from: {$this->filePath}");
-            return;
-        }
+        // Split into chunks
+        $chunks = $this->splitText($content);
 
-        $chunks = $this->chunkText($text);
-        $docId = Str::uuid()->toString();
+        foreach ($chunks as $chunk) {
+            // Embed text using ingest service
+            $embedResponse = Http::timeout(30)->post(
+                env("INGEST_URL") . "/embed",
+                [
+                    "text" => $chunk,
+                ],
+            );
 
-        foreach ($chunks as $idx => $chunk) {
-            $vec = $this->embedText($ollama, $embedModel, $chunk);
+            if (
+                !$embedResponse->successful() ||
+                !isset($embedResponse["vector"])
+            ) {
+                throw new Exception(
+                    "Embedding failed: " . $embedResponse->body(),
+                );
+            }
 
-            $qdrant->put("/collections/{$qdrantCollection}/points", [
-                "json" => [
+            $vector = $embedResponse["vector"];
+
+            // Store in DB
+            $documentChunk = DocumentChunk::create([
+                "document_id" => $document->id,
+                "chunk_text" => $chunk,
+            ]);
+
+            // Store vector in Qdrant
+            $pointId = "doc_{$documentChunk->id}";
+            $qdrantResponse = Http::timeout(30)->post(
+                env("QDRANT_URL") .
+                    "/collections/" .
+                    env("QDRANT_COLLECTION") .
+                    "/points",
+                [
                     "points" => [
                         [
-                            "id" => Str::uuid()->toString(),
-                            "vector" => $vec,
+                            "id" => $pointId,
+                            "vector" => $vector,
                             "payload" => [
-                                "text" => $chunk,
-                                "source" => $this->source,
+                                "document_id" => $document->id,
+                                "chunk_id" => $documentChunk->id,
                                 "tags" => $this->tags,
-                                "doc_id" => $docId,
-                                "chunk_idx" => $idx,
                             ],
                         ],
                     ],
                 ],
-            ]);
+            );
+
+            if (!$qdrantResponse->successful()) {
+                throw new Exception(
+                    "Qdrant store failed: " . $qdrantResponse->body(),
+                );
+            }
+
+            $documentChunk->update(["qdrant_point_id" => $pointId]);
         }
-
-        Http::post(url("/api/train-webhook"), [
-            "status" => "completed",
-            "fileName" => basename($this->filePath),
-            "fileId" => $docId,
-        ]);
     }
 
-    private function embedText(
-        Client $ollama,
-        string $model,
-        string $txt,
-    ): array {
-        $res = $ollama->post("/api/embeddings", [
-            "json" => [
-                "model" => $model,
-                "input" => $txt,
-            ],
-        ]);
-        $js = json_decode($res->getBody(), true);
-        return $js["embedding"] ?? [];
-    }
-
-    private function extractText(string $path): ?string
+    private function splitText($text)
     {
-        return file_get_contents($path);
-    }
-
-    private function chunkText(string $txt, int $size = 1000): array
-    {
-        $txt = preg_replace("/\s+/", " ", $txt);
-        return str_split($txt, $size);
+        $text = str_replace("\r\n", "\n", $text);
+        $chunks = preg_split('/\n\s*\n/', $text); // split paragraph
+        return array_filter(array_map("trim", $chunks));
     }
 }

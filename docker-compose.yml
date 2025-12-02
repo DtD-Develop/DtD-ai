@@ -24,6 +24,7 @@ services:
       dockerfile: Dockerfile.horizon
     container_name: dtd-ai-horizon-1
     depends_on:
+      - mysql
       - backend
       - redis
     restart: unless-stopped
