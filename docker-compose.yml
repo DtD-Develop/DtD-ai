@@ -1,24 +1,40 @@
 version: "3.9"
 
 services:
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: dtdai
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:alpine
+    networks:
+      - app-network
+
   backend:
     build:
       context: ./backend
-    container_name: laravel_backend
-    restart: unless-stopped
-    volumes:
-      - ./backend:/var/www/html
-      - ./backend/storage:/var/www/html/storage
-      - storage_data:/var/www/html/storage
+    environment:
+      DB_HOST: mysql
+      DB_DATABASE: dtdai
+      DB_USERNAME: root
+      DB_PASSWORD: root
+      REDIS_HOST: redis
     depends_on:
       mysql:
         condition: service_healthy
-      redis:
-        condition: service_started
-      qdrant:
-        condition: service_started
-      ollama:
-        condition: service_started
+    volumes:
+      - storage_data:/var/www/html/storage
+      - logs_data:/var/www/html/storage/logs
     networks:
       - app-network
 
@@ -26,111 +42,52 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.horizon
-    container_name: dtd-ai-horizon-1
     depends_on:
-      mysql:
-        condition: service_healthy
-      backend:
-        condition: service_started
-      redis:
-        condition: service_started
-    restart: unless-stopped
-    env_file:
-      - ./backend/.env
-    volumes:
-      - storage_data:/var/www/html/storage
-    networks:
-      - app-network
-
-  ingest_service:
-    build:
-      context: ./ingest_service
-    container_name: ingest_service
-    ports:
-      - "8001:8001"
-    volumes:
-      - ./backend/storage:/app/storage
+      - backend
     networks:
       - app-network
 
   frontend:
     build:
       context: ./frontend
-    container_name: next_frontend
-    ports:
-      - "3000:3000"
+      args:
+        NEXT_PUBLIC_API_URL: "http://backend"
     networks:
       - app-network
 
-  nginx:
-    image: nginx:latest
-    container_name: nginx
-    restart: unless-stopped
-    ports:
-      - "8000:80"
-    volumes:
-      - ./backend:/var/www/html
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+  ingest:
+    build:
+      context: ./ingest_service
     depends_on:
-      - backend
-    networks:
-      - app-network
-
-  mysql:
-    image: mysql:8.0
-    container_name: dtd-ai-mysql-1
-    restart: unless-stopped
-    environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: ai_platform
-      MYSQL_USER: aiuser
-      MYSQL_PASSWORD: aipassword
-    volumes:
-      - mysql_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    networks:
-      - app-network
-
-  redis:
-    image: redis:7-alpine
-    container_name: dtd-ai-redis-1
-    restart: unless-stopped
+      - qdrant
     networks:
       - app-network
 
   qdrant:
-    image: qdrant/qdrant:latest
-    container_name: qdrant
-    restart: unless-stopped
-    ports:
-      - "6333:6333"
+    image: qdrant/qdrant:v1.11.0
     volumes:
       - qdrant_data:/qdrant/storage
     networks:
       - app-network
 
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
-    restart: unless-stopped
+  nginx:
+    image: nginx:alpine
     ports:
-      - "11434:11434"
+      - "80:80"
     volumes:
-      - ollama_models:/root/.ollama
-      - ./backend/ollama-init.sh:/ollama-init.sh
-    entrypoint: ["/bin/sh", "-c", "/ollama-init.sh"]
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+      - storage_data:/var/www/html/storage
+    depends_on:
+      - backend
+      - frontend
     networks:
       - app-network
 
-volumes:
-  mysql_data:
-  ollama_models:
-  qdrant_data:
-  storage_data:
-
 networks:
   app-network:
+
+volumes:
+  mysql_data:
+  storage_data:
+  logs_data:
+  qdrant_data:

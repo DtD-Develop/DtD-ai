@@ -12,9 +12,4 @@ COPY . .
 RUN composer install --no-dev --optimize-autoloader
 
 # 🌟 แก้ปัญหา: รอ DB + migrate ก่อน start Horizon
-CMD sh -c " \
-    php artisan config:clear && \
-    php artisan key:generate --force && \
-    (php artisan migrate --force || true) && \
-    php artisan horizon \
-"
+CMD sh -c " php artisan horizon"
