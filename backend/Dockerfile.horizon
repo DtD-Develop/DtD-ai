@@ -9,7 +9,12 @@ WORKDIR /var/www/html
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 COPY . .
 
-RUN composer install --no-dev --optimize-autoloader \
-    && php artisan config:clear
+RUN composer install --no-dev --optimize-autoloader
 
-CMD ["php", "artisan", "horizon"]
+# 🌟 แก้ปัญหา: รอ DB + migrate ก่อน start Horizon
+CMD sh -c " \
+    php artisan config:clear && \
+    php artisan key:generate --force && \
+    (php artisan migrate --force || true) && \
+    php artisan horizon \
+"
