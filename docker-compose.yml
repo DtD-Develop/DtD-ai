@@ -19,14 +19,12 @@ services:
   horizon:
     build:
       context: ./backend
+      dockerfile: Dockerfile.horizon
     container_name: dtd-ai-horizon-1
-    command: sh -c "php artisan horizon"
     depends_on:
       - backend
       - redis
     restart: unless-stopped
-    volumes:
-      - ./backend:/var/www/html
     networks:
       - app-network
 
