@@ -8,6 +8,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./backend:/var/www/html
+      - ./backend/storage:/var/www/html/storage
     depends_on:
       - mysql
       - redis
@@ -34,6 +35,8 @@ services:
     container_name: ingest_service
     ports:
       - "8001:8001"
+    volumes:
+      - ./backend/storage:/app/storage
     networks:
       - app-network
 
