@@ -117,7 +117,7 @@ volumes:
   mysql_data:
   ollama_models:
   qdrant_data:
-  shared_storage:
+  storage_data:
 
 networks:
   app-network:
