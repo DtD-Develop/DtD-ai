@@ -105,6 +105,7 @@ services:
 
 volumes:
   mysql_data:
+  ollama_models:
 
 networks:
   app-network:
