@@ -94,10 +94,14 @@ services:
     image: ollama/ollama:latest
     container_name: ollama
     restart: unless-stopped
+    command: ["/bin/sh", "-c", "/ollama-init.sh"]
     ports:
       - "11434:11434"
     networks:
       - app-network
+    volumes:
+      - ollama_models:/root/.ollama
+      - ./backend/ollama-init.sh:/ollama-init.sh
 
 volumes:
   mysql_data:
