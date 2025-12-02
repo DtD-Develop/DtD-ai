@@ -99,7 +99,7 @@ services:
     volumes:
       - ollama_models:/root/.ollama
       - ./backend/ollama-init.sh:/ollama-init.sh
-    command: ["/bin/sh", "-c", "/ollama-init.sh"]
+    entrypoint: ["/bin/sh", "-c", "/ollama-init.sh"]
     networks:
       - app-network
 
