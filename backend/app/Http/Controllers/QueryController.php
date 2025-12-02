@@ -2,6 +2,7 @@
 namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use GuzzleHttp\Client;
+use Illuminate\Support\Facades\Log;
 
 class QueryController
 {
@@ -190,21 +191,34 @@ class QueryController
 
         // 5) Ask LLM
         try {
-            $res = $ollamaClient->post("/api/generate", [
+            $res2 = $ollamaClient->post("/api/generate", [
                 "json" => [
                     "model" => $ollamaModel,
                     "prompt" => $prompt,
                     "stream" => false,
+                    "keep_alive" => "15m",
                     "options" => [
-                        "temperature" => 0.2,
                         "num_predict" => 256,
+                        "temperature" => 0.2,
+                        "top_p" => 0.95,
+                        "num_ctx" => 6144,
                     ],
                 ],
             ]);
-            $ollamaRes = json_decode((string) $res->getBody(), true);
-            $answer = $ollamaRes["response"] ?? "ไม่พบข้อมูลในเอกสาร";
+
+            $ollamaRes = json_decode((string) $res2->getBody(), true);
+
+            $answer =
+                $ollamaRes["response"] ??
+                ($ollamaRes["output"] ??
+                    ($ollamaRes["message"]["content"] ?? null));
+
+            if (!$answer) {
+                $answer = "ไม่พบข้อมูลในเอกสาร";
+            }
         } catch (\Exception $e) {
-            $answer = "Ollama call failed: " . $e->getMessage();
+            Log::error("Ollama call failed: " . $e->getMessage());
+            $answer = "ไม่พบข้อมูลในเอกสาร";
         }
 
         return response()->json([
