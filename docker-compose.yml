@@ -1,49 +1,32 @@
 version: "3.9"
 
 services:
-  mysql:
-    image: mysql:8.0
-    environment:
-      MYSQL_ROOT_PASSWORD: secret
-      MYSQL_DATABASE: ai_platform
-      MYSQL_USER: aiuser
-      MYSQL_PASSWORD: aipassword
-    volumes:
-      - mysql_data:/var/lib/mysql
-    networks:
-      - app-network
-
-  redis:
-    image: redis:7-alpine
-    volumes:
-      - redis_data:/data
-    networks:
-      - app-network
-
-  qdrant:
-    image: qdrant/qdrant:latest
-    container_name: qdrant
+  backend:
+    build:
+      context: ./backend
+    container_name: laravel_backend
     restart: unless-stopped
-    ports:
-      - "6333:6333"
     volumes:
-      - qdrant_data:/qdrant/storage
+      - ./backend:/var/www/html
+    depends_on:
+      - mysql
+      - redis
+      - qdrant
+      - ollama
     networks:
       - app-network
 
-  ollama:
-    image: ollama/ollama:latest
-    container_name: ollama
+  horizon:
+    build:
+      context: ./backend
+    container_name: dtd-ai-horizon-1
+    command: sh -c "php artisan horizon"
+    depends_on:
+      - backend
+      - redis
     restart: unless-stopped
-    ports:
-      - "11434:11434"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - capabilities: ["gpu"]
     volumes:
-      - ollama_data:/root/.ollama
+      - ./backend:/var/www/html
     networks:
       - app-network
 
@@ -51,61 +34,17 @@ services:
     build:
       context: ./ingest_service
     container_name: ingest_service
-    restart: unless-stopped
-    environment:
-      - QDRANT_URL=http://qdrant:6333
-      - OLLAMA_URL=http://ollama:11434
     ports:
       - "8001:8001"
-    depends_on:
-      qdrant:
-        condition: service_started
     networks:
       - app-network
 
-  backend:
+  frontend:
     build:
-      context: ./backend
-    container_name: laravel_backend
-    restart: unless-stopped
-    environment:
-      APP_NAME: "AIPlatform"
-      APP_ENV: "production"
-      APP_KEY: "base64:j0jBjc7JuzZ795fD6jmY0aWdtVwTerCf8Q7zTSOh++M="
-      APP_DEBUG: "false"
-      APP_URL: "http://nginx"
-
-      DB_CONNECTION: "mysql"
-      DB_HOST: "dtd-ai-mysql-1"
-      DB_PORT: "3306"
-      DB_DATABASE: "ai_platform"
-      DB_USERNAME: "aiuser"
-      DB_PASSWORD: "aipassword"
-
-      QUEUE_CONNECTION: "redis"
-      REDIS_CLIENT: predis
-      REDIS_HOST: redis
-      REDIS_PASSWORD: null
-      REDIS_PORT: 6379
-
-      QDRANT_URL: "http://qdrant:6333"
-      OLLAMA_URL: "http://ollama:11434"
-      OLLAMA_MODEL: "llama3.1:8b"
-
-      INGEST_URL: "http://ingest_service:8001"
-      INGEST_SERVICE_URL: "http://ingest_service:8001/process"
-
-      QDRANT_COLLECTION: "company_kb"
-      CHAT_COLLECTION: "chat_messages"
-    volumes:
-      - ./backend:/var/www/html
-    depends_on:
-      mysql:
-        condition: service_started
-      qdrant:
-        condition: service_started
-      ingest_service:
-        condition: service_started
+      context: ./frontend
+    container_name: next_frontend
+    ports:
+      - "3000:3000"
     networks:
       - app-network
 
@@ -123,40 +62,47 @@ services:
     networks:
       - app-network
 
-  horizon:
-    build:
-      context: ./backend
-    command: php artisan horizon
-    restart: unless-stopped
-    depends_on:
-      - backend
-      - redis
-    networks:
-      - app-network
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_API_URL: "http://34.177.85.88:8000"
-        NEXT_PUBLIC_FILE_API_URL: "http://34.177.85.88:8001"
-    container_name: next_frontend
+  mysql:
+    image: mysql:8.0
+    container_name: dtd-ai-mysql-1
     restart: unless-stopped
     environment:
-      - NEXT_PUBLIC_API_URL=http://34.177.85.88:8000
-      - NEXT_PUBLIC_FILE_API_URL=http://34.177.85.88:8001
-    ports:
-      - "3000:3000"
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: ai_platform
+      MYSQL_USER: aiuser
+      MYSQL_PASSWORD: aipassword
+    volumes:
+      - mysql_data:/var/lib/mysql
     networks:
       - app-network
 
-networks:
-  app-network:
+  redis:
+    image: redis:7-alpine
+    container_name: dtd-ai-redis-1
+    restart: unless-stopped
+    networks:
+      - app-network
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+    networks:
+      - app-network
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    networks:
+      - app-network
 
 volumes:
   mysql_data:
-  redis_data:
-  qdrant_data:
-  ollama_data:
-  n8n_data:
+
+networks:
+  app-network:
