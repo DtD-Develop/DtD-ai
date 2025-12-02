@@ -11,13 +11,12 @@ class QueryController
         $conversationId =
             $request->input("conversation_id") ?: bin2hex(random_bytes(16));
 
-        $mode = $request->input("mode", "test"); // "test" | "train" | "prod"
-        $userId = $request->input("user_id"); // string หรือ null
+        $mode = $request->input("mode", "test");
+        $userId = $request->input("user_id");
 
-        // ฟิลเตอร์ KB
-        $sourceFilter = $request->input("source"); // string
-        $sources = $request->input("sources", []); // array<string>
-        $tags = $request->input("tags", []); // array<string>
+        $sourceFilter = $request->input("source");
+        $sources = $request->input("sources", []);
+        $tags = $request->input("tags", []);
         $kbLimit = intval($request->input("top_k_kb", 8));
         $minKbScore = floatval($request->input("min_kb_score", 0.2));
 
@@ -51,10 +50,10 @@ class QueryController
             $embedJson = json_decode((string) $embedRes->getBody(), true);
             $queryVector = $embedJson["vector"] ?? null;
         } catch (\Exception $e) {
-            \Log::warning("embed failed: " . $e->getMessage());
+            Log::warning("embed failed: " . $e->getMessage());
         }
 
-        // 2) KB search (semantic + filters + threshold)
+        // 2) KB semantic search
         $kbContexts = [];
         $kbCitations = [];
         $kbHits = [];
@@ -67,6 +66,7 @@ class QueryController
                     "with_payload" => true,
                 ];
 
+                // Filters
                 $must = [];
                 if ($sourceFilter) {
                     $must[] = [
@@ -75,20 +75,14 @@ class QueryController
                     ];
                 }
                 if (is_array($sources) && count($sources) > 0) {
-                    $should = [];
                     foreach ($sources as $s) {
-                        $should[] = [
+                        $must[] = [
                             "key" => "source",
                             "match" => ["value" => $s],
                         ];
                     }
-                    $must[] = ["should" => $should];
                 }
-                if (is_array($tags) && count($tags) > 0) {
-                    foreach ($tags as $t) {
-                        $must[] = ["key" => "tags", "match" => ["value" => $t]];
-                    }
-                }
+
                 if (count($must) > 0) {
                     $searchBody["filter"] = ["must" => $must];
                 }
@@ -98,14 +92,16 @@ class QueryController
                     ["json" => $searchBody],
                 );
                 $qdrantRes = json_decode((string) $resp->getBody(), true);
+
                 $i = 1;
                 foreach ($qdrantRes["result"] ?? [] as $r) {
                     $score = $r["score"] ?? 0.0;
                     $payload = $r["payload"] ?? [];
+
                     if ($score >= $minKbScore && isset($payload["text"])) {
                         $kbContexts[] = $payload["text"];
                         $kbCitations[] =
-                            "[k{$i}] source=" .
+                            "[k{$i}] " .
                             ($payload["source"] ?? "unknown") .
                             " score=" .
                             round($score, 3);
@@ -114,217 +110,108 @@ class QueryController
                             "source" => $payload["source"] ?? "unknown",
                             "doc_id" => $payload["doc_id"] ?? null,
                             "score" => $score,
-                            "chunk_idx" => $payload["chunk_idx"] ?? null,
                         ];
                         $i++;
                     }
                 }
             } catch (\Exception $e) {
-                \Log::warning("kb search failed: " . $e->getMessage());
+                Log::warning("kb search failed: " . $e->getMessage());
             }
         }
 
-        // 2.1 Fallback: ถ้าไม่เจอ KB แต่มี source → scroll ตามไฟล์
-        if (count($kbContexts) === 0 && $sourceFilter) {
-            try {
-                $resp = $qdrantClient->post(
-                    "/collections/{$kbCollection}/points/scroll",
-                    [
-                        "json" => [
-                            "limit" => $kbLimit,
-                            "with_payload" => true,
-                            "with_vectors" => false,
-                            "filter" => [
-                                "must" => [
-                                    [
-                                        "key" => "source",
-                                        "match" => ["value" => $sourceFilter],
-                                    ],
-                                ],
-                            ],
-                        ],
-                    ],
-                );
-                $js = json_decode((string) $resp->getBody(), true);
-                $i = 1;
-                foreach ($js["result"]["points"] ?? [] as $p) {
-                    $pl = $p["payload"] ?? [];
-                    if (isset($pl["text"])) {
-                        $kbContexts[] = $pl["text"];
-                        $kbCitations[] =
-                            "[k{$i}] source=" .
-                            ($pl["source"] ?? "unknown") .
-                            " score=scroll";
-                        $kbHits[] = [
-                            "k" => "k{$i}",
-                            "source" => $pl["source"] ?? "unknown",
-                            "doc_id" => $pl["doc_id"] ?? null,
-                            "score" => null,
-                            "chunk_idx" => $pl["chunk_idx"] ?? null,
-                        ];
-                        $i++;
-                        if (count($kbContexts) >= $kbLimit) {
-                            break;
-                        }
-                    }
-                }
-            } catch (\Exception $e) {
-                \Log::warning("kb scroll fallback failed: " . $e->getMessage());
-            }
-        }
-
-        // 3) Chat memory (semantic + recent)
-        $chatSnippets = [];
-        if ($mode !== "prod" && $queryVector) {
-            try {
-                $chatRes = $ingestClient->post("/chat/search", [
+        // 2.1 Extract all tags for safety check
+        $qdrantTags = [];
+        try {
+            $respTags = $qdrantClient->post(
+                "/collections/{$kbCollection}/points/scroll",
+                [
                     "json" => [
-                        "conversation_id" => $conversationId,
-                        "user_id" => $userId,
-                        "mode" => $mode,
-                        "query" => $q,
-                        "limit" => 6,
+                        "limit" => 500,
+                        "with_payload" => true,
+                        "with_vectors" => false,
                     ],
-                ]);
-                $chatJson = json_decode((string) $chatRes->getBody(), true);
-                foreach ($chatJson["results"] ?? [] as $hit) {
-                    $p = $hit["payload"] ?? [];
-                    if (isset($p["role"], $p["text"])) {
-                        $chatSnippets[] =
-                            strtoupper($p["role"]) . ": " . $p["text"];
+                ],
+            );
+            $tagData = json_decode((string) $respTags->getBody(), true);
+            foreach ($tagData["result"]["points"] ?? [] as $p) {
+                $payload = $p["payload"] ?? [];
+                if (isset($payload["tags"]) && is_array($payload["tags"])) {
+                    foreach ($payload["tags"] as $t) {
+                        $qdrantTags[strtolower($t)] = true;
                     }
                 }
-            } catch (\Exception $e) {
-                \Log::warning("chat/search failed: " . $e->getMessage());
             }
+        } catch (\Exception $e) {
+            Log::warning("fetch tags failed: " . $e->getMessage());
         }
-        if ($mode !== "prod") {
-            try {
-                $recentRes = $ingestClient->post("/chat/recent", [
-                    "json" => [
-                        "conversation_id" => $conversationId,
-                        "user_id" => $userId,
-                        "mode" => $mode,
-                        "limit" => 8,
-                    ],
-                ]);
-                $recentJson = json_decode((string) $recentRes->getBody(), true);
-                foreach ($recentJson["results"] ?? [] as $item) {
-                    $p = $item["payload"] ?? [];
-                    if (isset($p["role"], $p["text"])) {
-                        $line = strtoupper($p["role"]) . ": " . $p["text"];
-                        if (!in_array($line, $chatSnippets)) {
-                            $chatSnippets[] = $line;
-                        }
-                    }
-                }
-            } catch (\Exception $e) {
-                \Log::warning("chat/recent failed: " . $e->getMessage());
+
+        $isTagRelated = false;
+        foreach (array_keys($qdrantTags) as $tag) {
+            if (stripos(strtolower($q), $tag) !== false) {
+                $isTagRelated = true;
+                break;
             }
         }
 
-        // 4) Prompt เข้มงวด
-        $kbContextText = implode("\n---\n", $kbContexts);
-        $kbCitationsText = implode("\n", $kbCitations);
-        $chatContextText = implode("\n", $chatSnippets);
-
+        // 3) Final fallback if KB not found
         if (empty($kbContexts)) {
-            // fallback greeting or normal chat
+            if ($isTagRelated) {
+                return response()->json([
+                    "answer" => "ไม่พบข้อมูลในเอกสาร",
+                    "conversation_id" => $conversationId,
+                    "kb_used" => 0,
+                ]);
+            }
+
+            // Chatbot mode
             $fallbackRes = $ollamaClient->post("/api/generate", [
                 "json" => [
                     "model" => $ollamaModel,
                     "prompt" =>
-                        "ตอบคำถามต่อไปนี้เป็นธรรมชาติและสุภาพในภาษาเดียวกับคำถาม:\n\n" .
+                        "ตอบคำถามให้เป็นธรรมชาติและใช้ภาษาตรงกับคำถาม:\n\n" .
                         "Question:\n{$q}\n",
                     "stream" => false,
-                    "keep_alive" => "15m",
-                    "options" => [
-                        "num_predict" => 256,
-                        "temperature" => 0.8,
-                        "top_p" => 0.9,
-                    ],
                 ],
             ]);
-            $ollamaRes = json_decode((string) $fallbackRes->getBody(), true);
-            $answer = $ollamaRes["response"] ?? "ฉันสามารถช่วยอะไรได้บ้าง?";
-
+            $js = json_decode((string) $fallbackRes->getBody(), true);
             return response()->json([
-                "answer" => $answer,
+                "answer" => $js["response"] ?? "ฉันสามารถช่วยอะไรได้บ้าง?",
                 "conversation_id" => $conversationId,
             ]);
         }
 
+        // 4) Build KB Prompt
         $prompt =
-            "You are a precise assistant. STRICTLY follow the rules:\n" .
-            "1) Prefer KB Context. If KB Context does not contain the needed info, answer naturally without mentioning the KB.\n" .
-            "2) If Chat Memory conflicts with KB Context, IGNORE Chat Memory and prefer KB Context.\n" .
-            "3) Include citations like [k1], [k2] where applicable.\n" .
-            "4) Answer in the same language as the question. Keep it concise.\n\n" .
-            "KB Context:\n{$kbContextText}\n\n" .
-            "KB Citations:\n{$kbCitationsText}\n\n" .
-            "Chat Memory (intent only, do not use as facts if conflict):\n{$chatContextText}\n\n" .
+            "ตอบตามข้อมูลจาก KB เท่านั้น ถ้า KB ไม่มีข้อมูลให้ตอบว่าไม่พบข้อมูลในเอกสาร\n\n" .
+            "KB:\n" .
+            implode("\n---\n", $kbContexts) .
+            "\n\n" .
             "Question:\n{$q}\n";
 
-        // 5) LLM
+        // 5) Ask LLM
         try {
-            $res2 = $ollamaClient->post("/api/generate", [
+            $res = $ollamaClient->post("/api/generate", [
                 "json" => [
                     "model" => $ollamaModel,
                     "prompt" => $prompt,
                     "stream" => false,
-                    "keep_alive" => "15m",
                     "options" => [
-                        "num_predict" => 256,
                         "temperature" => 0.2,
-                        "top_p" => 0.95,
-                        "num_ctx" => 6144,
+                        "num_predict" => 256,
                     ],
                 ],
             ]);
-            $ollamaRes = json_decode((string) $res2->getBody(), true);
-            $answer = $ollamaRes["response"] ?? ($ollamaRes["output"] ?? null);
-            if ($answer === null) {
-                $answer = json_encode($ollamaRes);
-            }
+            $ollamaRes = json_decode((string) $res->getBody(), true);
+            $answer = $ollamaRes["response"] ?? "ไม่พบข้อมูลในเอกสาร";
         } catch (\Exception $e) {
             $answer = "Ollama call failed: " . $e->getMessage();
         }
 
-        // 6) Save chat
-        if ($mode !== "prod") {
-            try {
-                $ingestClient->post("/chat/upsert", [
-                    "json" => [
-                        "conversation_id" => $conversationId,
-                        "user_id" => $userId,
-                        "mode" => $mode,
-                        "role" => "user",
-                        "text" => $q,
-                    ],
-                ]);
-            } catch (\Exception $e) {
-            }
-            try {
-                $ingestClient->post("/chat/upsert", [
-                    "json" => [
-                        "conversation_id" => $conversationId,
-                        "user_id" => $userId,
-                        "mode" => $mode,
-                        "role" => "assistant",
-                        "text" => $answer,
-                    ],
-                ]);
-            } catch (\Exception $e) {
-            }
-        }
-
         return response()->json([
             "answer" => $answer,
-            "model_used" => $ollamaModel,
             "conversation_id" => $conversationId,
             "kb_used" => count($kbContexts),
             "kb_hits" => $kbHits,
-            "chat_memory_used" => count($chatSnippets),
         ]);
     }
 }
