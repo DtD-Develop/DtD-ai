@@ -51,7 +51,7 @@ services:
     build:
       context: ./frontend
       args:
-        NEXT_PUBLIC_API_URL: "http://backend"
+        NEXT_PUBLIC_API_URL: "http://34.177.111.106"
     networks:
       - app-network
 
