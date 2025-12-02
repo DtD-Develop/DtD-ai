@@ -27,6 +27,8 @@ services:
       - backend
       - redis
     restart: unless-stopped
+    env_file:
+      - ./backend/.env
     volumes:
       - storage_data:/var/www/html/storage
     networks:
