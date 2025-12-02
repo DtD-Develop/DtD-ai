@@ -92,7 +92,9 @@ services:
 
   ollama:
     container_name: ollama
-    image: ollama/ollama:latest
+    build:
+      context: .
+      dockerfile: ./ollama/Dockerfile
     volumes:
       - ollama_models:/root/.ollama
     networks:

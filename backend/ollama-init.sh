@@ -1,16 +1,15 @@
 #!/bin/sh
 set -e
 
-echo "Starting Ollama service in background..."
+echo "Starting Ollama service..."
 /bin/ollama serve &
 
-# รอให้ service พร้อมก่อนดึง model
-sleep 3
+# Wait for service to be ready
+sleep 5
 
-echo "Pulling models..."
-/bin/ollama pull llama3.1:8b || true
-/bin/ollama pull nomic-embed-text || true
+echo "Pulling required models (only if not exists)..."
+ollama list | grep -q "llama3.1:8b" || ollama pull llama3.1:8b
+ollama list | grep -q "nomic-embed-text" || ollama pull nomic-embed-text
 
-echo "Ollama Init Completed. Keeping container alive..."
-# foreground wait เพื่อไม่ให้ container exit
+echo "Ollama is ready!"
 wait
