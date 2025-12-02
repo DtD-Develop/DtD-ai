@@ -11,10 +11,14 @@ services:
       - ./backend/storage:/var/www/html/storage
       - storage_data:/var/www/html/storage
     depends_on:
-      - mysql
-      - redis
-      - qdrant
-      - ollama
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      qdrant:
+        condition: service_started
+      ollama:
+        condition: service_started
     networks:
       - app-network
 
@@ -24,9 +28,12 @@ services:
       dockerfile: Dockerfile.horizon
     container_name: dtd-ai-horizon-1
     depends_on:
-      - mysql
-      - backend
-      - redis
+      mysql:
+        condition: service_healthy
+      backend:
+        condition: service_started
+      redis:
+        condition: service_started
     restart: unless-stopped
     env_file:
       - ./backend/.env
@@ -80,6 +87,11 @@ services:
       MYSQL_PASSWORD: aipassword
     volumes:
       - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     networks:
       - app-network
 
