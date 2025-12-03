@@ -79,7 +79,7 @@ services:
     networks:
       - app-network
     expose:
-      - "8001"
+      - "8001:8001"
 
   qdrant:
     image: qdrant/qdrant:v1.11.0
