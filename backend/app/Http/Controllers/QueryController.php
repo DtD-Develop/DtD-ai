@@ -1,231 +1,117 @@
 <?php
+
 namespace App\Http\Controllers;
+
 use Illuminate\Http\Request;
-use GuzzleHttp\Client;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class QueryController
 {
     public function query(Request $request)
     {
-        $q = $request->input("query", "");
+        $query = $request->input("query", "");
+        if (!$query) {
+            return response()->json(["error" => "query is required"], 400);
+        }
+
         $conversationId =
             $request->input("conversation_id") ?: bin2hex(random_bytes(16));
 
-        $mode = $request->input("mode", "test");
-        $userId = $request->input("user_id");
+        $kbLimit = intval($request->input("top_k_kb", 6));
+        $minScore = floatval($request->input("min_kb_score", 0.2));
 
-        $sourceFilter = $request->input("source");
-        $sources = $request->input("sources", []);
-        $tags = $request->input("tags", []);
-        $kbLimit = intval($request->input("top_k_kb", 8));
-        $minKbScore = floatval($request->input("min_kb_score", 0.2));
-
-        $qdrantUrl = env("QDRANT_URL", "http://qdrant:6333");
+        $qdrantUrl = env("QDRANT_HOST", "http://qdrant:6333");
+        $ingestUrl = env("INGEST_ENDPOINT", "http://ingest:8001");
         $ollamaUrl = env("OLLAMA_URL", "http://ollama:11434");
         $ollamaModel = env("OLLAMA_MODEL", "llama3.1:8b");
-        $ingestUrl = env("INGEST_URL", "http://ingest_service:8001");
-        $kbCollection = env("QDRANT_COLLECTION", "company_kb");
+        $collection = env("QDRANT_COLLECTION", "dtd_kb");
 
-        $qdrantClient = new Client([
-            "base_uri" => $qdrantUrl,
-            "timeout" => 10.0,
-        ]);
-        $ingestClient = new Client([
-            "base_uri" => $ingestUrl,
-            "timeout" => 30.0,
-        ]);
-        $ollamaClient = new Client([
-            "base_uri" => $ollamaUrl,
-            "timeout" => 600.0,
-            "read_timeout" => 600.0,
-            "connect_timeout" => 10.0,
-        ]);
-
-        // 1) Embed query
-        $queryVector = null;
+        // 1) Embed Query
         try {
-            $embedRes = $ingestClient->post("/embed", [
-                "json" => ["text" => $q],
+            $embedRes = Http::timeout(30)->post($ingestUrl . "/embed-text", [
+                "text" => $query,
             ]);
-            $embedJson = json_decode((string) $embedRes->getBody(), true);
-            $queryVector = $embedJson["vector"] ?? null;
-        } catch (\Exception $e) {
-            Log::warning("embed failed: " . $e->getMessage());
+
+            $vector = $embedRes->json("vector");
+        } catch (\Throwable $e) {
+            Log::error("embed error: " . $e->getMessage());
+            $vector = null;
         }
 
-        // 2) KB semantic search
         $kbContexts = [];
-        $kbCitations = [];
         $kbHits = [];
 
-        if ($queryVector) {
+        if ($vector) {
             try {
-                $searchBody = [
-                    "vector" => $queryVector,
-                    "limit" => $kbLimit,
-                    "with_payload" => true,
-                ];
+                $resp = Http::timeout(20)->post(
+                    "$qdrantUrl/collections/$collection/points/search",
+                    [
+                        "vector" => $vector,
+                        "limit" => $kbLimit,
+                        "with_payload" => true,
+                    ],
+                );
 
-                // Filters
-                $must = [];
-                if ($sourceFilter) {
-                    $must[] = [
-                        "key" => "source",
-                        "match" => ["value" => $sourceFilter],
+                $results = $resp->json("result") ?? [];
+                foreach ($results as $i => $hit) {
+                    $score = $hit["score"] ?? 0;
+                    $payload = $hit["payload"] ?? [];
+
+                    if ($score < $minScore || empty($payload["text"])) {
+                        continue;
+                    }
+
+                    $kbContexts[] = $payload["text"];
+                    $kbHits[] = [
+                        "chunk_index" => $payload["chunk_index"] ?? null,
+                        "kb_file_id" => $payload["kb_file_id"] ?? null,
+                        "file_name" => $payload["source"] ?? "unknown",
+                        "score" => round($score, 3),
                     ];
                 }
-                if (is_array($sources) && count($sources) > 0) {
-                    foreach ($sources as $s) {
-                        $must[] = [
-                            "key" => "source",
-                            "match" => ["value" => $s],
-                        ];
-                    }
-                }
-
-                if (count($must) > 0) {
-                    $searchBody["filter"] = ["must" => $must];
-                }
-
-                $resp = $qdrantClient->post(
-                    "/collections/{$kbCollection}/points/search",
-                    ["json" => $searchBody],
-                );
-                $qdrantRes = json_decode((string) $resp->getBody(), true);
-
-                $i = 1;
-                foreach ($qdrantRes["result"] ?? [] as $r) {
-                    $score = $r["score"] ?? 0.0;
-                    $payload = $r["payload"] ?? [];
-
-                    if ($score >= $minKbScore && isset($payload["text"])) {
-                        $kbContexts[] = $payload["text"];
-                        $kbCitations[] =
-                            "[k{$i}] " .
-                            ($payload["source"] ?? "unknown") .
-                            " score=" .
-                            round($score, 3);
-                        $kbHits[] = [
-                            "k" => "k{$i}",
-                            "source" => $payload["source"] ?? "unknown",
-                            "doc_id" => $payload["doc_id"] ?? null,
-                            "score" => $score,
-                        ];
-                        $i++;
-                    }
-                }
-            } catch (\Exception $e) {
-                Log::warning("kb search failed: " . $e->getMessage());
+            } catch (\Throwable $e) {
+                Log::warning("search error: " . $e->getMessage());
             }
         }
 
-        // 2.1 Extract all tags for safety check
-        $qdrantTags = [];
-        try {
-            $respTags = $qdrantClient->post(
-                "/collections/{$kbCollection}/points/scroll",
-                [
-                    "json" => [
-                        "limit" => 500,
-                        "with_payload" => true,
-                        "with_vectors" => false,
-                    ],
-                ],
-            );
-            $tagData = json_decode((string) $respTags->getBody(), true);
-            foreach ($tagData["result"]["points"] ?? [] as $p) {
-                $payload = $p["payload"] ?? [];
-                if (isset($payload["tags"]) && is_array($payload["tags"])) {
-                    foreach ($payload["tags"] as $t) {
-                        $qdrantTags[strtolower($t)] = true;
-                    }
-                }
-            }
-        } catch (\Exception $e) {
-            Log::warning("fetch tags failed: " . $e->getMessage());
-        }
-
-        $isTagRelated = false;
-        foreach (array_keys($qdrantTags) as $tag) {
-            if (stripos(strtolower($q), $tag) !== false) {
-                $isTagRelated = true;
-                break;
-            }
-        }
-
-        // 3) Final fallback if KB not found
+        // Fallback no KB
         if (empty($kbContexts)) {
-            if ($isTagRelated) {
-                return response()->json([
-                    "answer" => "ไม่พบข้อมูลในเอกสาร",
-                    "conversation_id" => $conversationId,
-                    "kb_used" => 0,
-                ]);
-            }
-
-            // Chatbot mode
-            $fallbackRes = $ollamaClient->post("/api/generate", [
-                "json" => [
-                    "model" => $ollamaModel,
-                    "prompt" =>
-                        "ตอบคำถามให้เป็นธรรมชาติและใช้ภาษาตรงกับคำถาม:\n\n" .
-                        "Question:\n{$q}\n",
-                    "stream" => false,
-                ],
-            ]);
-            $js = json_decode((string) $fallbackRes->getBody(), true);
+            $answer = $this->callLLM($ollamaUrl, $ollamaModel, $query);
             return response()->json([
-                "answer" => $js["response"] ?? "ฉันสามารถช่วยอะไรได้บ้าง?",
+                "answer" => $answer,
                 "conversation_id" => $conversationId,
+                "kb_used" => 0,
             ]);
         }
 
-        // 4) Build KB Prompt
-        $prompt =
-            "ตอบตามข้อมูลจาก KB เท่านั้น ถ้า KB ไม่มีข้อมูลให้ตอบว่าไม่พบข้อมูลในเอกสาร\n\n" .
-            "KB:\n" .
-            implode("\n---\n", $kbContexts) .
-            "\n\n" .
-            "Question:\n{$q}\n";
+        $ctx = implode("\n---\n", $kbContexts);
+        $prompt = "ตอบตามข้อมูลจาก KB เท่านั้น ถ้าไม่มีข้อมูลตอบว่าไม่พบ\n\nKB:\n$ctx\n\nQuestion:\n$query";
 
-        // 5) Ask LLM
-        try {
-            $res2 = $ollamaClient->post("/api/generate", [
-                "json" => [
-                    "model" => $ollamaModel,
-                    "prompt" => $prompt,
-                    "stream" => false,
-                    "keep_alive" => "15m",
-                    "options" => [
-                        "num_predict" => 256,
-                        "temperature" => 0.2,
-                        "top_p" => 0.95,
-                        "num_ctx" => 6144,
-                    ],
-                ],
-            ]);
-
-            $ollamaRes = json_decode((string) $res2->getBody(), true);
-
-            $answer =
-                $ollamaRes["response"] ??
-                ($ollamaRes["output"] ??
-                    ($ollamaRes["message"]["content"] ?? null));
-
-            if (!$answer) {
-                $answer = "ไม่พบข้อมูลในเอกสาร";
-            }
-        } catch (\Exception $e) {
-            Log::error("Ollama call failed: " . $e->getMessage());
-            $answer = "ไม่พบข้อมูลในเอกสาร";
-        }
+        $answer = $this->callLLM($ollamaUrl, $ollamaModel, $prompt);
 
         return response()->json([
             "answer" => $answer,
-            "conversation_id" => $conversationId,
             "kb_used" => count($kbContexts),
             "kb_hits" => $kbHits,
+            "conversation_id" => $conversationId,
         ]);
+    }
+
+    private function callLLM($base, $model, $prompt)
+    {
+        try {
+            $res = Http::timeout(300)->post("$base/api/generate", [
+                "model" => $model,
+                "prompt" => $prompt,
+                "stream" => false,
+                "options" => [
+                    "temperature" => 0.2,
+                ],
+            ]);
+            return $res->json("response") ?? "ไม่พบข้อมูล";
+        } catch (\Throwable $e) {
+            return "ไม่พบข้อมูล";
+        }
     }
 }

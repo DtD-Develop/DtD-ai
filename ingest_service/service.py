@@ -14,7 +14,7 @@ from sentence_transformers import SentenceTransformer
 # =========================
 
 MODEL_NAME = "intfloat/multilingual-e5-large"
-EMBED_DIM = 1024  # dim ของ multilingual-e5-large
+EMBED_DIM = 1024
 
 QDRANT_HOST = os.getenv("QDRANT_HOST", "http://qdrant:6333")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY") or None
@@ -22,14 +22,13 @@ QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "dtd_kb")
 
 app = FastAPI(title="DtD Ingest Service")
 
-# โหลด model ครั้งเดียว
 model = SentenceTransformer(MODEL_NAME)
 
-# Qdrant client
 qdrant = QdrantClient(
     url=QDRANT_HOST,
     api_key=QDRANT_API_KEY,
 )
+
 
 # =========================
 # Pydantic models
@@ -60,8 +59,16 @@ class EmbedResponse(BaseModel):
     chunks_count: int
 
 
+class EmbedTextRequest(BaseModel):
+    text: str
+
+
+class EmbedTextResponse(BaseModel):
+    vector: List[float]
+
+
 # =========================
-# Helpers: Collection
+# Helpers
 # =========================
 
 
@@ -76,39 +83,25 @@ def ensure_collection():
         )
 
 
-# =========================
-# Helpers: Text extractors (Hybrid)
-# =========================
-
-
 def read_file(file_path: str) -> str:
-    """
-    อ่านไฟล์เป็น text แบบ basic ก่อน
-    Hybrid:
-      - .md, .txt, .json, code → plain text
-      - .pptx → ดึงเป็นโครง markdown-like
-      - .pdf → plain text (ภายหลังจูนเพิ่มได้)
-      - .png/.jpg → OCR (optional)
-    """
     path = Path(file_path)
     if not path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
 
     ext = path.suffix.lower()
 
-    if ext in [".txt", ".md", ".json", ".py", ".js", ".ts", ".php", ".java", ".go"]:
+    if ext in [".txt", ".md", ".json"]:
         return path.read_text(encoding="utf-8", errors="ignore")
 
     if ext in [".pdf"]:
-        # NOTE: คุณเลือกใช้ pymupdf หรือ pdfplumber ก็ได้
         try:
-            import fitz  # pymupdf
+            import fitz
 
-            text = []
+            lines = []
             with fitz.open(file_path) as doc:
                 for page in doc:
-                    text.append(page.get_text())
-            return "\n".join(text)
+                    lines.append(page.get_text())
+            return "\n".join(lines)
         except Exception as e:
             raise RuntimeError(f"PDF parse error: {e}")
 
@@ -122,7 +115,6 @@ def read_file(file_path: str) -> str:
             raise RuntimeError(f"DOCX parse error: {e}")
 
     if ext in [".pptx"]:
-        # Hybrid → แปลง slide เป็น markdown-ish
         try:
             from pptx import Presentation
 
@@ -133,98 +125,57 @@ def read_file(file_path: str) -> str:
                 for shape in slide.shapes:
                     if hasattr(shape, "text") and shape.text.strip():
                         lines.append(shape.text.strip())
-                lines.append("")  # blank line
+                lines.append("")
             return "\n".join(lines)
         except Exception as e:
             raise RuntimeError(f"PPTX parse error: {e}")
 
-    if ext in [".png", ".jpg", ".jpeg", ".webp"]:
+    if ext in [".png", ".jpg", ".jpeg"]:
         try:
             import pytesseract
             from PIL import Image
 
             img = Image.open(file_path)
-            text = pytesseract.image_to_string(img)
-            return text
+            return pytesseract.image_to_string(img)
         except Exception as e:
             raise RuntimeError(f"OCR parse error: {e}")
 
-    # fallback ถ้าไม่รู้จัก → ลองอ่านเป็น text ปกติ
     return path.read_text(encoding="utf-8", errors="ignore")
 
 
-def chunk_text(text: str, max_chars: int = 1000, overlap: int = 200) -> List[str]:
-    """
-    แบ่ง text เป็น chunk แบบง่าย ๆ ตามจำนวนตัวอักษร
-    """
+def chunk_text(text: str, max_chars=1000, overlap=200) -> List[str]:
     text = text.strip()
     if not text:
         return []
 
     chunks = []
     start = 0
-    length = len(text)
+    L = len(text)
 
-    while start < length:
-        end = min(start + max_chars, length)
+    while start < L:
+        end = min(start + max_chars, L)
         chunk = text[start:end]
-
-        # extend to nearest newline ถ้าเจอ
-        newline_pos = chunk.rfind("\n")
-        if newline_pos != -1 and end != length:
-            end = start + newline_pos
+        newline = chunk.rfind("\n")
+        if newline != -1 and end != L:
+            end = start + newline
             chunk = text[start:end]
 
         chunks.append(chunk.strip())
         start = max(0, end - overlap)
-
-        if end == length:
+        if end == L:
             break
 
     return [c for c in chunks if c]
 
 
-def auto_tag(text: str, max_tags: int = 5) -> List[str]:
-    """
-    Auto tag แบบเบื้องต้น:
-      - split เป็นคำ
-      - ตัด stopwords ง่าย ๆ
-      - หาคำความถี่สูง (ความยาว > 4)
-    ภายหลังคุณสามารถใช้ model ทำ zero-shot classification ได้
-    """
+def auto_tag(text: str, max_tags=5) -> List[str]:
     import re
     from collections import Counter
 
-    text = text.lower()
-    tokens = re.findall(r"[a-zA-Zก-๙]{3,}", text)
-
-    stop = set(
-        [
-            "this",
-            "that",
-            "with",
-            "from",
-            "have",
-            "there",
-            "about",
-            "your",
-            "their",
-            "การ",
-            "และ",
-            "ของ",
-            "ที่",
-            "ใน",
-            "เป็น",
-            "ได้",
-            "ว่า",
-        ]
-    )
-
+    tokens = re.findall(r"[a-zA-Zก-๙]{3,}", text.lower())
+    stop = set(["this", "that", "with", "from", "การ", "และ", "ของ", "ที่", "ใน", "เป็น"])
     words = [t for t in tokens if t not in stop and len(t) > 4]
-    freq = Counter(words)
-    common = [w for w, _ in freq.most_common(max_tags)]
-
-    return common
+    return [w for w, _ in Counter(words).most_common(max_tags)]
 
 
 # =========================
@@ -234,78 +185,61 @@ def auto_tag(text: str, max_tags: int = 5) -> List[str]:
 
 @app.post("/parse", response_model=ParseResponse)
 def parse(req: ParseRequest):
-    """
-    รับ file_path จาก Laravel
-    → อ่านไฟล์
-    → Hybrid extract
-    → chunk
-    → auto-tags
-    """
     try:
         text = read_file(req.file_path)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-    if not text.strip():
-        raise HTTPException(status_code=400, detail="Empty content")
-
     chunks = chunk_text(text)
     tags = auto_tag(text)
-
     return ParseResponse(
-        tags=tags,
-        chunks=[Chunk(i=i, text=c) for i, c in enumerate(chunks)],
+        tags=tags, chunks=[Chunk(i=i, text=c) for i, c in enumerate(chunks)]
     )
 
 
 @app.post("/embed", response_model=EmbedResponse)
 def embed(req: EmbedRequest):
-    """
-    รับ file_path + tags + kb_file_id
-    → extract text + chunk เหมือน parse (หรือจะ reuse /parse ก็ได้)
-    → สร้าง embeddings ด้วย multilingual-e5-large
-    → upsert เข้า Qdrant
-    """
     try:
         text = read_file(req.file_path)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
     chunks = chunk_text(text)
     if not chunks:
-        raise HTTPException(status_code=400, detail="No chunks generated")
+        raise HTTPException(status_code=400, detail="No chunks")
 
     ensure_collection()
 
-    # สร้าง embeddings
-    embeddings = model.encode(chunks, batch_size=16, show_progress_bar=False)
+    vectors = model.encode(chunks, batch_size=16).tolist()
+    ids = [f"{req.kb_file_id}_{i}" for i in range(len(chunks))]
 
-    # เตรียม payload per chunk
-    payloads = []
-    for i, chunk_text_value in enumerate(chunks):
-        payload = {
-            "kb_file_id": req.kb_file_id,
-            "chunk_index": i,
-            "tags": req.tags or [],
-            "text": chunk_text_value,
-        }
-        payloads.append(payload)
-
-    # ใช้ upsert batch
     qdrant.upsert(
         collection_name=QDRANT_COLLECTION,
         points=qm.Batch(
-            ids=[
-                f"{req.kb_file_id}_{i}" if req.kb_file_id is not None else i
-                for i in range(len(chunks))
+            ids=ids,
+            vectors=vectors,
+            payloads=[
+                {
+                    "kb_file_id": req.kb_file_id,
+                    "chunk_index": i,
+                    "tags": req.tags or [],
+                    "text": chunk,
+                    "source": os.path.basename(req.file_path),
+                    "doc_id": req.kb_file_id,
+                }
+                for i, chunk in enumerate(chunks)
             ],
-            vectors=embeddings.tolist(),
-            payloads=payloads,
         ),
     )
 
     return EmbedResponse(chunks_count=len(chunks))
+
+
+@app.post("/embed-text", response_model=EmbedTextResponse)
+def embed_text(req: EmbedTextRequest):
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Text required")
+
+    vector = model.encode([text])[0]
+    return EmbedTextResponse(vector=vector.tolist())
