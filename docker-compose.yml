@@ -127,8 +127,7 @@ services:
       - N8N_HOST=34.177.111.106
       - N8N_PORT=5678
       - N8N_PROTOCOL=http
-      - WEBHOOK_URL=http://34.177.111.106:5678/
-      - VUE_APP_URL_BASE_API=http://34.177.111.106:5678/
+      - N8N_SECURE_COOKIE=false
     ports:
       - "5678:5678"
     volumes:
