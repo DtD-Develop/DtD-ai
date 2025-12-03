@@ -1,357 +1,311 @@
-import hashlib
+import mimetypes
 import os
-import time
-import uuid
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from qdrant_client import QdrantClient
-from qdrant_client.http.models import (
-    Distance,
-    FieldCondition,
-    Filter,
-    MatchValue,
-    PayloadSchemaType,
-    VectorParams,
-)
+from qdrant_client.http import models as qm
 from sentence_transformers import SentenceTransformer
 
-try:
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
-except ImportError:
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
+# =========================
+# Config
+# =========================
 
-app = FastAPI()
+MODEL_NAME = "intfloat/multilingual-e5-large"
+EMBED_DIM = 1024  # dim ของ multilingual-e5-large
 
-QDRANT_URL = os.environ.get("QDRANT_URL", "http://qdrant:6333")
-MODEL_NAME = os.environ.get("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-KB_COLLECTION = os.environ.get("QDRANT_COLLECTION", "company_kb")
-CHAT_COLLECTION = os.environ.get("CHAT_COLLECTION", "chat_messages")
+QDRANT_HOST = os.getenv("QDRANT_HOST", "http://qdrant:6333")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY") or None
+QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "dtd_kb")
 
-client = QdrantClient(url=QDRANT_URL)
-embedder = SentenceTransformer(MODEL_NAME)
+app = FastAPI(title="DtD Ingest Service")
 
+# โหลด model ครั้งเดียว
+model = SentenceTransformer(MODEL_NAME)
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
+# Qdrant client
+qdrant = QdrantClient(
+    url=QDRANT_HOST,
+    api_key=QDRANT_API_KEY,
+)
 
-
-def embedding_dimension() -> int:
-    try:
-        return embedder.get_sentence_embedding_dimension()
-    except Exception:
-        v = embedder.encode(["dimension-probe"])[0]
-        return len(v)
+# =========================
+# Pydantic models
+# =========================
 
 
-def ensure_collection(collection_name: str, vector_size: int):
-    try:
-        client.get_collection(collection_name=collection_name)
-    except Exception:
-        client.create_collection(
-            collection_name=collection_name,
-            vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
-        )
+class ParseRequest(BaseModel):
+    file_path: str
 
 
-def ensure_payload_indexes():
-    # Index สำหรับคีย์ที่กรองบ่อย
-    for field in ["source", "doc_id", "tags"]:
-        try:
-            client.create_payload_index(
-                collection_name=KB_COLLECTION,
-                field_name=field,
-                field_schema=PayloadSchemaType.KEYWORD,
-            )
-        except Exception:
-            pass
+class Chunk(BaseModel):
+    i: int
+    text: str
 
 
-def extract_text_from_bytes(filename, data_bytes):
-    p = Path(filename)
-    if p.suffix.lower() == ".pdf":
-        from io import BytesIO
-
-        from PyPDF2 import PdfReader
-
-        reader = PdfReader(BytesIO(data_bytes))
-        texts = [pg.extract_text() for pg in reader.pages]
-        return "\n".join([t for t in texts if t])
-    elif p.suffix.lower() == ".docx":
-        from io import BytesIO
-
-        import docx
-
-        doc = docx.Document(BytesIO(data_bytes))
-        return "\n".join([pr.text for pr in doc.paragraphs])
-    else:
-        try:
-            return data_bytes.decode("utf-8", errors="ignore")
-        except Exception:
-            return ""
+class ParseResponse(BaseModel):
+    tags: List[str]
+    chunks: List[Chunk]
 
 
-def make_doc_id(source_name: str) -> str:
-    return hashlib.sha256(source_name.encode("utf-8")).hexdigest()
+class EmbedRequest(BaseModel):
+    file_path: str
+    tags: Optional[List[str]] = None
+    kb_file_id: Optional[int] = None
 
 
-def upsert_document_text(source_name: str, text: str, tags: Optional[List[str]] = None):
-    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    chunks = splitter.split_text(text)
-    if not chunks:
-        return {"status": "no_text", "chunks": 0}
+class EmbedResponse(BaseModel):
+    chunks_count: int
 
-    vectors = embedder.encode(chunks)
-    dim = len(vectors[0])
-    ensure_collection(KB_COLLECTION, dim)
-    ensure_payload_indexes()
 
-    # ลบเวอร์ชันเดิมทั้งหมดของไฟล์นี้ด้วย doc_id
-    doc_id = make_doc_id(source_name)
-    try:
-        client.delete(
-            collection_name=KB_COLLECTION,
-            points_selector=Filter(
-                must=[FieldCondition(key="doc_id", match=MatchValue(value=doc_id))]
+# =========================
+# Helpers: Collection
+# =========================
+
+
+def ensure_collection():
+    if not qdrant.collection_exists(QDRANT_COLLECTION):
+        qdrant.recreate_collection(
+            collection_name=QDRANT_COLLECTION,
+            vectors_config=qm.VectorParams(
+                size=EMBED_DIM,
+                distance=qm.Distance.COSINE,
             ),
         )
-    except Exception:
-        pass
-
-    ts = time.time()
-    points = []
-    for i, v in enumerate(vectors):
-        points.append(
-            {
-                "id": str(uuid.uuid4()),
-                "vector": v.tolist(),
-                "payload": {
-                    "doc_id": doc_id,
-                    "source": source_name,
-                    "tags": tags or [],
-                    "chunk_idx": i,
-                    "text": chunks[i],
-                    "timestamp": ts,
-                },
-            }
-        )
-    client.upsert(collection_name=KB_COLLECTION, points=points)
-    return {"status": "ok", "chunks": len(chunks), "doc_id": doc_id}
 
 
-# ---------- KB ingestion: เดิม (ไฟล์เดียว) ----------
-@app.post("/process")
-async def process(file: UploadFile = File(...)):
-    content = await file.read()
-    text = extract_text_from_bytes(file.filename, content)
+# =========================
+# Helpers: Text extractors (Hybrid)
+# =========================
+
+
+def read_file(file_path: str) -> str:
+    """
+    อ่านไฟล์เป็น text แบบ basic ก่อน
+    Hybrid:
+      - .md, .txt, .json, code → plain text
+      - .pptx → ดึงเป็นโครง markdown-like
+      - .pdf → plain text (ภายหลังจูนเพิ่มได้)
+      - .png/.jpg → OCR (optional)
+    """
+    path = Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    ext = path.suffix.lower()
+
+    if ext in [".txt", ".md", ".json", ".py", ".js", ".ts", ".php", ".java", ".go"]:
+        return path.read_text(encoding="utf-8", errors="ignore")
+
+    if ext in [".pdf"]:
+        # NOTE: คุณเลือกใช้ pymupdf หรือ pdfplumber ก็ได้
+        try:
+            import fitz  # pymupdf
+
+            text = []
+            with fitz.open(file_path) as doc:
+                for page in doc:
+                    text.append(page.get_text())
+            return "\n".join(text)
+        except Exception as e:
+            raise RuntimeError(f"PDF parse error: {e}")
+
+    if ext in [".docx"]:
+        try:
+            from docx import Document
+
+            doc = Document(file_path)
+            return "\n".join(p.text for p in doc.paragraphs)
+        except Exception as e:
+            raise RuntimeError(f"DOCX parse error: {e}")
+
+    if ext in [".pptx"]:
+        # Hybrid → แปลง slide เป็น markdown-ish
+        try:
+            from pptx import Presentation
+
+            prs = Presentation(file_path)
+            lines = []
+            for i, slide in enumerate(prs.slides):
+                lines.append(f"# Slide {i + 1}")
+                for shape in slide.shapes:
+                    if hasattr(shape, "text") and shape.text.strip():
+                        lines.append(shape.text.strip())
+                lines.append("")  # blank line
+            return "\n".join(lines)
+        except Exception as e:
+            raise RuntimeError(f"PPTX parse error: {e}")
+
+    if ext in [".png", ".jpg", ".jpeg", ".webp"]:
+        try:
+            import pytesseract
+            from PIL import Image
+
+            img = Image.open(file_path)
+            text = pytesseract.image_to_string(img)
+            return text
+        except Exception as e:
+            raise RuntimeError(f"OCR parse error: {e}")
+
+    # fallback ถ้าไม่รู้จัก → ลองอ่านเป็น text ปกติ
+    return path.read_text(encoding="utf-8", errors="ignore")
+
+
+def chunk_text(text: str, max_chars: int = 1000, overlap: int = 200) -> List[str]:
+    """
+    แบ่ง text เป็น chunk แบบง่าย ๆ ตามจำนวนตัวอักษร
+    """
+    text = text.strip()
     if not text:
-        raise HTTPException(status_code=400, detail="No text extracted")
-    res = upsert_document_text(file.filename, text, [])
-    return JSONResponse(res)
+        return []
 
+    chunks = []
+    start = 0
+    length = len(text)
 
-# ---------- Embedding API ----------
-class EmbedRequest(BaseModel):
-    text: str
+    while start < length:
+        end = min(start + max_chars, length)
+        chunk = text[start:end]
 
+        # extend to nearest newline ถ้าเจอ
+        newline_pos = chunk.rfind("\n")
+        if newline_pos != -1 and end != length:
+            end = start + newline_pos
+            chunk = text[start:end]
 
-@app.post("/embed")
-def embed(req: EmbedRequest):
-    vec = embedder.encode([req.text])[0].tolist()
-    return {"vector": vec, "dim": len(vec), "model": MODEL_NAME}
+        chunks.append(chunk.strip())
+        start = max(0, end - overlap)
 
-
-# ---------- Chat APIs ----------
-class ChatUpsertRequest(BaseModel):
-    conversation_id: str
-    user_id: Optional[str] = None  # แยกตาม user
-    mode: str = "test"  # "test" | "train" | "prod"
-    role: str  # "user" | "assistant" | "system"
-    text: str
-    timestamp: Optional[float] = None
-
-
-@app.post("/chat/upsert")
-def chat_upsert(req: ChatUpsertRequest):
-    v = embedder.encode([req.text])[0]
-    dim = len(v)
-    ensure_collection(CHAT_COLLECTION, dim)
-
-    ts = req.timestamp if req.timestamp is not None else time.time()
-    point = {
-        "id": str(uuid.uuid4()),
-        "vector": v.tolist(),
-        "payload": {
-            "conversation_id": req.conversation_id,
-            "user_id": req.user_id,
-            "mode": req.mode,
-            "role": req.role,
-            "text": req.text,
-            "timestamp": ts,
-        },
-    }
-    client.upsert(collection_name=CHAT_COLLECTION, points=[point])
-    return {"status": "ok", "id": point["id"], "timestamp": ts}
-
-
-class ChatSearchRequest(BaseModel):
-    conversation_id: Optional[str] = None
-    user_id: Optional[str] = None
-    mode: Optional[str] = None  # ถ้าอยากดึงเฉพาะ "test" หรือ "train"
-    query: str
-    limit: int = 5
-
-
-@app.post("/chat/search")
-def chat_search(req: ChatSearchRequest):
-    qv = embedder.encode([req.query])[0]
-    dim = len(qv)
-    ensure_collection(CHAT_COLLECTION, dim)
-
-    must = []
-
-    if req.conversation_id:
-        must.append(
-            FieldCondition(
-                key="conversation_id",
-                match=MatchValue(value=req.conversation_id),
-            )
-        )
-
-    if req.user_id:
-        must.append(
-            FieldCondition(
-                key="user_id",
-                match=MatchValue(value=req.user_id),
-            )
-        )
-
-    if req.mode:
-        must.append(
-            FieldCondition(
-                key="mode",
-                match=MatchValue(value=req.mode),
-            )
-        )
-
-    qfilter = Filter(must=must) if must else None
-
-    hits = client.search(
-        collection_name=CHAT_COLLECTION,
-        query_vector=qv.tolist(),
-        limit=req.limit,
-        query_filter=qfilter,
-        with_payload=True,
-    )
-    out = [
-        {
-            "id": h.id,
-            "score": h.score,
-            "payload": h.payload,
-        }
-        for h in hits
-    ]
-    return {"results": out}
-
-
-class ChatRecentRequest(BaseModel):
-    conversation_id: Optional[str] = None
-    user_id: Optional[str] = None
-    mode: Optional[str] = None
-    limit: int = 8
-
-
-@app.post("/chat/recent")
-def chat_recent(req: ChatRecentRequest):
-    must = []
-
-    if req.conversation_id:
-        must.append(
-            FieldCondition(
-                key="conversation_id",
-                match=MatchValue(value=req.conversation_id),
-            )
-        )
-
-    if req.user_id:
-        must.append(
-            FieldCondition(
-                key="user_id",
-                match=MatchValue(value=req.user_id),
-            )
-        )
-
-    if req.mode:
-        must.append(
-            FieldCondition(
-                key="mode",
-                match=MatchValue(value=req.mode),
-            )
-        )
-
-    scroll_filter = Filter(must=must) if must else None
-
-    all_points = []
-    next_page = None
-    while True:
-        resp = client.scroll(
-            collection_name=CHAT_COLLECTION,
-            scroll_filter=scroll_filter,
-            limit=200,
-            with_payload=True,
-            with_vectors=False,
-            offset=next_page,
-        )
-        points, next_page = resp
-        all_points.extend(points)
-        if not next_page or len(all_points) >= 2000:
+        if end == length:
             break
 
-    items = []
-    for p in all_points:
-        payload = p.payload or {}
-        ts = payload.get("timestamp", 0.0)
-        items.append({"id": p.id, "payload": payload, "timestamp": ts})
-
-    items.sort(key=lambda x: x["timestamp"])
-    last_items = items[-req.limit :] if req.limit > 0 else items
-    return {"results": last_items}
+    return [c for c in chunks if c]
 
 
-# ---------- KB: ingest หลายไฟล์ + ลบตาม source ----------
-@app.post("/kb/ingest_many")
-async def kb_ingest_many(
-    files: List[UploadFile] = File(...),
-    tags: Optional[str] = Form(None),  # CSV: "finance,plan,2025"
-):
-    tag_list = [t.strip() for t in tags.split(",")] if tags else []
-    results = []
-    for f in files:
-        content = await f.read()
-        text = extract_text_from_bytes(f.filename, content)
-        if not text:
-            results.append({"file": f.filename, "status": "no_text"})
-            continue
-        res = upsert_document_text(f.filename, text, tag_list)
-        results.append({"file": f.filename, **res})
-    return {"ingested": results}
+def auto_tag(text: str, max_tags: int = 5) -> List[str]:
+    """
+    Auto tag แบบเบื้องต้น:
+      - split เป็นคำ
+      - ตัด stopwords ง่าย ๆ
+      - หาคำความถี่สูง (ความยาว > 4)
+    ภายหลังคุณสามารถใช้ model ทำ zero-shot classification ได้
+    """
+    import re
+    from collections import Counter
+
+    text = text.lower()
+    tokens = re.findall(r"[a-zA-Zก-๙]{3,}", text)
+
+    stop = set(
+        [
+            "this",
+            "that",
+            "with",
+            "from",
+            "have",
+            "there",
+            "about",
+            "your",
+            "their",
+            "การ",
+            "และ",
+            "ของ",
+            "ที่",
+            "ใน",
+            "เป็น",
+            "ได้",
+            "ว่า",
+        ]
+    )
+
+    words = [t for t in tokens if t not in stop and len(t) > 4]
+    freq = Counter(words)
+    common = [w for w, _ in freq.most_common(max_tags)]
+
+    return common
 
 
-class DeleteBySourceRequest(BaseModel):
-    source: str
+# =========================
+# Endpoints
+# =========================
 
 
-@app.post("/kb/delete_by_source")
-def kb_delete_by_source(req: DeleteBySourceRequest):
-    doc_id = make_doc_id(req.source)
-    client.delete(
-        collection_name=KB_COLLECTION,
-        points_selector=Filter(
-            must=[FieldCondition(key="doc_id", match=MatchValue(value=doc_id))]
+@app.post("/parse", response_model=ParseResponse)
+def parse(req: ParseRequest):
+    """
+    รับ file_path จาก Laravel
+    → อ่านไฟล์
+    → Hybrid extract
+    → chunk
+    → auto-tags
+    """
+    try:
+        text = read_file(req.file_path)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="Empty content")
+
+    chunks = chunk_text(text)
+    tags = auto_tag(text)
+
+    return ParseResponse(
+        tags=tags,
+        chunks=[Chunk(i=i, text=c) for i, c in enumerate(chunks)],
+    )
+
+
+@app.post("/embed", response_model=EmbedResponse)
+def embed(req: EmbedRequest):
+    """
+    รับ file_path + tags + kb_file_id
+    → extract text + chunk เหมือน parse (หรือจะ reuse /parse ก็ได้)
+    → สร้าง embeddings ด้วย multilingual-e5-large
+    → upsert เข้า Qdrant
+    """
+    try:
+        text = read_file(req.file_path)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    chunks = chunk_text(text)
+    if not chunks:
+        raise HTTPException(status_code=400, detail="No chunks generated")
+
+    ensure_collection()
+
+    # สร้าง embeddings
+    embeddings = model.encode(chunks, batch_size=16, show_progress_bar=False)
+
+    # เตรียม payload per chunk
+    payloads = []
+    for i, chunk_text_value in enumerate(chunks):
+        payload = {
+            "kb_file_id": req.kb_file_id,
+            "chunk_index": i,
+            "tags": req.tags or [],
+            "text": chunk_text_value,
+        }
+        payloads.append(payload)
+
+    # ใช้ upsert batch
+    qdrant.upsert(
+        collection_name=QDRANT_COLLECTION,
+        points=qm.Batch(
+            ids=[
+                f"{req.kb_file_id}_{i}" if req.kb_file_id is not None else i
+                for i in range(len(chunks))
+            ],
+            vectors=embeddings.tolist(),
+            payloads=payloads,
         ),
     )
-    return {"status": "ok", "deleted_doc_id": doc_id}
+
+    return EmbedResponse(chunks_count=len(chunks))

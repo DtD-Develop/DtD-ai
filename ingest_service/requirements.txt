@@ -3,6 +3,10 @@ uvicorn
 qdrant-client
 sentence-transformers
 python-multipart
-PyPDF2
+
+# Extractors (เลือกใช้ / ติดตามทีหลัง)
+pymupdf
 python-docx
-langchain-text-splitters
+python-pptx
+Pillow
+pytesseract
