@@ -43,6 +43,7 @@ services:
         condition: service_started
     volumes:
       - storage_data:/var/www/html/storage
+      - ./backend/.env:/var/www/html/.env
     networks:
       - app-network
     expose:
@@ -78,7 +79,7 @@ services:
       - ollama
     networks:
       - app-network
-    expose:
+    ports:
       - "8001:8001"
 
   qdrant:
@@ -87,8 +88,8 @@ services:
       - qdrant_data:/qdrant/storage
     networks:
       - app-network
-    expose:
-      - "6333"
+    ports:
+      - "6333:6333"
 
   ollama:
     container_name: ollama
