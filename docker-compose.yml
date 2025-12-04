@@ -21,17 +21,6 @@ services:
   backend:
     build:
       context: ./backend
-    environment:
-      APP_ENV: production
-      APP_KEY: base64:ATr0Lm2hEjH3cQ8xglcU8zZcy9QfwUSxqTK7eJjFB8w=
-      DB_HOST: mysql
-      DB_PORT: 3306
-      DB_DATABASE: dtdai
-      DB_USERNAME: root
-      DB_PASSWORD: root
-      REDIS_HOST: redis
-      OLLAMA_HOST: http://ollama:11434
-      QDRANT_URL: http://qdrant:6333
     depends_on:
       mysql:
         condition: service_healthy
