@@ -63,6 +63,7 @@ services:
       context: ./frontend
       args:
         NEXT_PUBLIC_API_URL: "http://34.177.111.106"
+        NEXT_PUBLIC_API_KEY: "WEB_QUERY_KEY_2025"
     depends_on:
       - backend
     networks:

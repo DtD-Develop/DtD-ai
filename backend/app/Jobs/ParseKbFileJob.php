@@ -38,10 +38,44 @@ class ParseKbFileJob implements ShouldQueue
             ]);
         }
 
-        $data = $resp->json();
+        $parseResult = $resp->json();
+        $autoTags = $parseResult["tags"] ?? [];
+
+        // หลังจากอ่านไฟล์ + chunk + auto_tag เสร็จ
+        $chunks = $parseResult["chunks"] ?? [];
+        $texts = collect($chunks)
+            ->pluck("text")
+            ->map(fn($t) => trim($t))
+            ->all();
+        $fullText = implode("\n\n---\n\n", $texts);
+
+        // สร้าง summary prompt แบบ TL;DR + Bullet list
+        $prompt = <<<PROMPT
+        สรุปเนื้อหาในไฟล์นี้ให้อยู่ในรูปแบบ:
+
+        TL;DR:
+        - สรุปเนื้อหาหลักไม่เกิน 3-4 ประโยค
+
+        Key Points:
+        - ใส่ bullet point 4-8 ข้อที่อธิบายสิ่งสำคัญในไฟล์
+        - กระชับ ชัดเจน ไม่ลากยาว
+
+        [CONTENT START]
+        {$fullText}
+        [CONTENT END]
+        PROMPT;
+
+        $summaryRes = Http::post(env("OLLAMA_URL") . "/api/generate", [
+            "model" => env("OLLAMA_MODEL", "llama3.1:8b"),
+            "prompt" => $prompt,
+            "stream" => false,
+        ]);
+
+        $summary = $summaryRes->json()["response"] ?? null;
 
         $kb->update([
-            "auto_tags" => $data["tags"] ?? [],
+            "auto_tags" => $autoTags,
+            "summary" => $summary,
             "progress" => 60,
             "status" => "tagged",
         ]);

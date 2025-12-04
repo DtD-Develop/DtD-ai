@@ -1,27 +1,26 @@
-import type { ReactNode } from "react";
+import "./globals.css";
+import { ThemeProvider } from "@/components/theme-provider";
+import { TopNav } from "@/components/navigation/top-nav";
 
 export const metadata = {
-  title: "AI Chat UI",
-  description: "AI Chat and Upload UI",
+  title: "DtD-AI",
+  description: "Your Knowledge & Chat AI",
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
-    <html lang="en">
-      <body>
-        <div style={{ maxWidth: 900, margin: "0 auto", padding: 20 }}>
-          <h1>AI Platform Frontend</h1>
-          <nav style={{ marginBottom: 20 }}>
-            <a href="/chat" style={{ marginRight: 12 }}>
-              Chat
-            </a>
-            <a href="/upload" style={{ marginRight: 12 }}>
-              Upload
-            </a>
-            <a href="/train">Train</a>
-          </nav>
-          {children}
-        </div>
+    <html lang="en" suppressHydrationWarning>
+      <body className="min-h-screen bg-background text-foreground">
+        <ThemeProvider>
+          <TopNav />
+          <main className="container max-w-5xl mx-auto py-6 px-4">
+            {children}
+          </main>
+        </ThemeProvider>
       </body>
     </html>
   );

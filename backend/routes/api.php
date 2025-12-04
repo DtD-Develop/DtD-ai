@@ -5,6 +5,7 @@ use App\Http\Controllers\KbController;
 use App\Http\Controllers\QueryController;
 use App\Http\Controllers\ApiLogController;
 use App\Http\Controllers\ChatController;
+use App\Http\Controllers\DashboardController;
 
 // Route::post("/upload", [UploadController::class, "upload"]);
 // Route::post("/train", [UploadController::class, "train"]);
@@ -16,6 +17,15 @@ Route::get("/health", function () {
 
 Route::middleware(["api-key", "api-log"])->group(function () {
     // Chat & manual train
+    Route::get("/chat/conversations", [ChatController::class, "list"]);
+    Route::post("/chat/conversations", [ChatController::class, "create"]);
+    Route::get("/chat/conversations/{id}", [ChatController::class, "show"]);
+    Route::delete("/chat/conversations/{id}", [
+        ChatController::class,
+        "destroy",
+    ]);
+    Route::post("/chat/store", [ChatController::class, "storeMessages"]);
+
     Route::post("/chat/test", [ChatController::class, "test"]);
     Route::post("/chat/teach", [ChatController::class, "teach"]);
 
@@ -27,9 +37,52 @@ Route::middleware(["api-key", "api-log"])->group(function () {
     Route::post("/kb/files/{id}/confirm", [KbController::class, "confirm"]);
     Route::delete("/kb/files/{id}", [KbController::class, "destroy"]);
 
+    // Get chunks
+    Route::get("/kb/files/{id}/chunks", [KbController::class, "chunks"]);
+
+    // Delete chunk
+    Route::delete("/kb/files/{id}/chunks/{chunkId}", [
+        KbController::class,
+        "deleteChunk",
+    ]);
+
     // public query
     Route::post("/query", [QueryController::class, "query"]);
 
     // API logs
     Route::get("/logs", [ApiLogController::class, "index"]);
+
+    Route::get("/dashboard/overview", [DashboardController::class, "overview"]);
+    Route::get("/dashboard/query-chart", [
+        DashboardController::class,
+        "queryChart",
+    ]);
+    Route::get("/dashboard/recent-queries", [
+        DashboardController::class,
+        "recentQueries",
+    ]);
+
+    Route::get("/chat/conversations", [ChatController::class, "index"]);
+    Route::post("/chat/conversations", [
+        ChatController::class,
+        "storeConversation",
+    ]);
+    Route::get("/chat/conversations/{conversation}", [
+        ChatController::class,
+        "showConversation",
+    ]);
+    Route::patch("/chat/conversations/{conversation}", [
+        ChatController::class,
+        "updateConversation",
+    ]);
+    Route::delete("/chat/conversations/{conversation}", [
+        ChatController::class,
+        "destroyConversation",
+    ]);
+
+    Route::post("/chat/message", [ChatController::class, "message"]);
+    Route::post("/chat/messages/{message}/rate", [
+        ChatController::class,
+        "rate",
+    ]);
 });

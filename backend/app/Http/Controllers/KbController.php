@@ -162,4 +162,18 @@ class KbController extends Controller
 
         return response()->json(["message" => "KB file deleted"]);
     }
+
+    public function chunks($id)
+    {
+        $file = KbFile::findOrFail($id);
+        return response()->json($file->chunks);
+    }
+
+    public function deleteChunk($id, $chunkId)
+    {
+        $chunk = KbChunk::where("kb_file_id", $id)->findOrFail($chunkId);
+        $chunk->delete();
+
+        return response()->json(["status" => "deleted"]);
+    }
 }
