@@ -29,6 +29,9 @@ Route::middleware(["api-key", "api-log"])->group(function () {
     Route::post("/chat/test", [ChatController::class, "test"]);
     Route::post("/chat/teach", [ChatController::class, "teach"]);
 
+    Route::post("/chat", [ChatController::class, "handle"]);
+    Route::post("/chat/{id}/rate", [ChatController::class, "rate"]);
+
     // KB upload / manage
     Route::post("/kb/upload", [KbController::class, "upload"]);
     Route::get("/kb/files", [KbController::class, "index"]);
