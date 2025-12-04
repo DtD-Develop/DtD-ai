@@ -2,10 +2,10 @@ import { Message } from "@/lib/api";
 
 type Props = {
   message: Message;
-  childrenBelow?: React.ReactNode; // สำหรับ stars + badge
+  children?: React.ReactNode; // สำหรับ stars + badge
 };
 
-export function ChatBubble({ message, childrenBelow }: Props) {
+export function ChatBubble({ message, children }: Props) {
   const isUser = message.role === "user";
 
   return (
@@ -23,7 +23,7 @@ export function ChatBubble({ message, childrenBelow }: Props) {
         >
           {message.content}
         </div>
-        {childrenBelow}
+        {children}
       </div>
     </div>
   );

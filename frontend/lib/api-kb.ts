@@ -28,6 +28,10 @@ export const kbApi = {
     });
   },
 
+  getFileList(): Promise<any[]> {
+    return kbFetch(`/api/kb/files`);
+  },
+
   getFile(id: number): Promise<any> {
     return kbFetch(`/api/kb/files/${id}`);
   },
