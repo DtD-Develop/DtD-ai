@@ -93,7 +93,7 @@ class QueryService
         ?int $conversationId,
     ): string {
         $response = Http::post("http://ollama:11434/api/chat", [
-            "model" => "llama3:8b",
+            "model" => "llama3.1:8b",
             "messages" => $messages,
         ]);
 
