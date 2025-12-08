@@ -343,7 +343,7 @@ export default function UploadKbPage() {
   }, [selectedFileId]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8">
+    <div className="p-4 md:p-8">
       <div className="max-w-6xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -364,7 +364,7 @@ export default function UploadKbPage() {
         {/* Upload area */}
         <div className="mb-6">
           <div
-            className="border border-dashed border-slate-600 bg-slate-900/60 rounded-xl p-6 flex flex-col md:flex-row items-center justify-between gap-4"
+            className="border border-dashed border-slate-600 bg-slate-900/10 rounded-xl p-6 flex flex-col md:flex-row items-center justify-between gap-4"
             onDragOver={(e) => e.preventDefault()}
             onDrop={handleDrop}
           >
@@ -394,7 +394,7 @@ export default function UploadKbPage() {
         {/* Main content: table + logs */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Table */}
-          <section className="lg:col-span-2 rounded-2xl border border-slate-800 bg-slate-900/60 p-4">
+          <section className="lg:col-span-2 rounded-2xl border border-slate-800 bg-slate-900/10 p-4">
             <div className="flex items-center justify-between mb-3">
               <div className="text-sm font-semibold">KB Files</div>
               {loading && (
@@ -429,7 +429,7 @@ export default function UploadKbPage() {
                   {files.map((file) => (
                     <tr
                       key={file.id}
-                      className={`border-b border-slate-800/60 hover:bg-slate-800/60 cursor-pointer ${
+                      className={`border-b border-slate-800/10 hover:bg-slate-800/10 cursor-pointer ${
                         selectedFileId === file.id ? "bg-slate-800/80" : ""
                       }`}
                       onClick={() => setSelectedFileId(file.id)}
@@ -501,7 +501,7 @@ export default function UploadKbPage() {
                             handleConfirm(file);
                           }}
                           disabled={file.status !== "tagged"}
-                          className="inline-flex items-center rounded-full border border-emerald-500/60 px-2 py-0.5 text-[10px] text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-40"
+                          className="inline-flex items-center rounded-full border border-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-300 hover:bg-emerald-500/20 disabled:opacity-40"
                         >
                           Confirm
                         </button>
@@ -511,7 +511,7 @@ export default function UploadKbPage() {
                             e.stopPropagation();
                             handleDelete(file);
                           }}
-                          className="inline-flex items-center rounded-full border border-rose-500/60 px-2 py-0.5 text-[10px] text-rose-300 hover:bg-rose-500/20"
+                          className="inline-flex items-center rounded-full border border-rose-500/10 px-2 py-0.5 text-[10px] text-rose-300 hover:bg-rose-500/20"
                         >
                           Delete
                         </button>
@@ -524,7 +524,7 @@ export default function UploadKbPage() {
           </section>
 
           {/* Logs + Tags side panel */}
-          <section className="rounded-2xl border border-slate-800 bg-slate-900/60 p-4 flex flex-col">
+          <section className="rounded-2xl border border-slate-800 bg-slate-900/10 p-4 flex flex-col">
             <div className="text-sm font-semibold mb-2">Details & Logs</div>
             {!selectedFile && (
               <div className="flex-1 flex items-center justify-center text-[11px] text-slate-500 text-center px-4">
@@ -578,7 +578,7 @@ export default function UploadKbPage() {
 
                 {/* Logs */}
                 <div className="text-[11px] font-semibold mb-1">Logs</div>
-                <div className="flex-1 overflow-y-auto border border-slate-800 rounded-md bg-slate-950/60 p-2 space-y-1 text-[11px]">
+                <div className="flex-1 overflow-y-auto border border-slate-800 rounded-md bg-slate-950/10 p-2 space-y-1 text-[11px]">
                   {logsForSelected.length === 0 && (
                     <div className="text-slate-500">
                       No logs available for this file.

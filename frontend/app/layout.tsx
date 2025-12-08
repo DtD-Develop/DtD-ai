@@ -17,9 +17,7 @@ export default function RootLayout({
       <body className="min-h-screen bg-background text-foreground">
         <ThemeProvider>
           <TopNav />
-          <main className="container max-w-5xl mx-auto py-6 px-4">
-            {children}
-          </main>
+          <main className="container mx-auto py-6 px-4">{children}</main>
         </ThemeProvider>
       </body>
     </html>
