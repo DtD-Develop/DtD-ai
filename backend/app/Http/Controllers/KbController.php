@@ -48,7 +48,8 @@ class KbController extends Controller
             ]);
 
             // ส่งเข้า queue ให้ ingest/parse
-            ParseKbFileJob::dispatch($kb->id);
+            dispatch(new ParseKbFileJob($kb->id));
+            // ParseKbFileJob::dispatch($kb->id);
 
             $uploaded[] = $kb;
         }
@@ -137,7 +138,8 @@ class KbController extends Controller
         $kb->progress = 80;
         $kb->save();
 
-        EmbedKbFileJob::dispatch($kb->id);
+        dispatch(new EmbedKbFileJob($kb->id));
+        // EmbedKbFileJob::dispatch($kb->id);
 
         return response()->json([
             "message" => "Embedding started",

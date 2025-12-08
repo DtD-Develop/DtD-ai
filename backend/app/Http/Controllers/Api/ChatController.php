@@ -164,7 +164,10 @@ class ChatController extends Controller
             ]);
 
             // ยิง job ให้ AI ตั้งชื่อห้องที่ "ฉลาดขึ้น" แบบ async
-            \App\Jobs\GenerateConversationTitleJob::dispatch($conversation->id);
+            dispatch(
+                new \App\Jobs\GenerateConversationTitleJob($conversation->id),
+            );
+            // \App\Jobs\GenerateConversationTitleJob::dispatch($conversation->id);
         }
 
         // 2) เซฟ user message ก่อน

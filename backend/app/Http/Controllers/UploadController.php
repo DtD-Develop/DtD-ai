@@ -39,9 +39,15 @@ class UploadController
                 $paths[] = $path;
 
                 // ส่งเข้า Queue ต่อไฟล์แต่ละไฟล์
-                ProcessUploadJob::dispatch($path, [
-                    "tags" => $tags,
-                ]);
+                dispatch(
+                    new ProcessUploadJob($path, [
+                        "tags" => $tags,
+                    ]),
+                );
+
+                // ProcessUploadJob::dispatch($path, [
+                //     "tags" => $tags,
+                // ]);
             }
 
             return response()->json([
@@ -59,9 +65,15 @@ class UploadController
             $stored = $uploadDir . "/" . $file->getClientOriginalName();
             $file->move($uploadDir, $file->getClientOriginalName());
 
-            ProcessUploadJob::dispatch($stored, [
-                "tags" => $tags,
-            ]);
+            dispatch(
+                new ProcessUploadJob($stored, [
+                    "tags" => $tags,
+                ]),
+            );
+
+            // ProcessUploadJob::dispatch($stored, [
+            //     "tags" => $tags,
+            // ]);
 
             return response()->json([
                 "status" => "queued",
@@ -84,9 +96,15 @@ class UploadController
             $stored = $uploadDir . "/" . $fileName;
             file_put_contents($stored, $binaryData);
 
-            ProcessUploadJob::dispatch($stored, [
-                "tags" => $tags,
-            ]);
+            dispatch(
+                new ProcessUploadJob($stored, [
+                    "tags" => $tags,
+                ]),
+            );
+
+            // ProcessUploadJob::dispatch($stored, [
+            //     "tags" => $tags,
+            // ]);
 
             return response()->json([
                 "status" => "queued",
