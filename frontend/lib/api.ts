@@ -30,8 +30,6 @@ export type ConversationWithMessages = Conversation & {
 const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "";
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "";
 
-console.log(API_KEY);
-
 async function apiFetch<T>(
   path: string,
   options: RequestInit = {},
@@ -91,6 +89,7 @@ export const chatApi = {
     answer: string;
     kb_hits: any[];
   }> {
+    console.log(API_KEY);
     return apiFetch("/api/chat/message", {
       method: "POST",
       body: JSON.stringify(payload),
