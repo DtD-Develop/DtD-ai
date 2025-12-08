@@ -5,6 +5,7 @@ use App\Http\Controllers\KbController;
 use App\Http\Controllers\QueryController;
 use App\Http\Controllers\ApiLogController;
 use App\Http\Controllers\ChatController;
+use App\Http\Controllers\Api\ChatController as ChatApiController;
 use App\Http\Controllers\DashboardController;
 
 // Route::post("/upload", [UploadController::class, "upload"]);
@@ -17,17 +18,20 @@ Route::get("/health", function () {
 
 Route::middleware(["api-key", "api-log"])->group(function () {
     // Chat & manual train
-    Route::get("/chat/conversations", [ChatController::class, "list"]);
-    Route::post("/chat/conversations", [ChatController::class, "create"]);
-    Route::get("/chat/conversations/{id}", [ChatController::class, "show"]);
-    Route::delete("/chat/conversations/{id}", [
-        ChatController::class,
-        "destroy",
-    ]);
-    Route::post("/chat/store", [ChatController::class, "storeMessages"]);
+    // Route::get("/chat/conversations", [ChatController::class, "list"]);
+    // Route::post("/chat/conversations", [ChatController::class, "create"]);
+    // Route::get("/chat/conversations/{id}", [ChatController::class, "show"]);
+    // Route::delete("/chat/conversations/{id}", [
+    //     ChatController::class,
+    //     "destroy",
+    // ]);
+    // Route::post("/chat/store", [ChatController::class, "storeMessages"]);
 
-    Route::post("/chat/test", [ChatController::class, "test"]);
-    Route::post("/chat/teach", [ChatController::class, "teach"]);
+    // Route::post("/chat/test", [ChatController::class, "test"]);
+    // Route::post("/chat/teach", [ChatController::class, "teach"]);
+
+    // Route::post("/chat", [ChatController::class, "handle"]);
+    // Route::post("/chat/{id}/rate", [ChatController::class, "rate"]);
 
     // KB upload / manage
     Route::post("/kb/upload", [KbController::class, "upload"]);
@@ -61,4 +65,16 @@ Route::middleware(["api-key", "api-log"])->group(function () {
         DashboardController::class,
         "recentQueries",
     ]);
+
+    Route::get("/chat/conversations", [ChatApiController::class, "list"]);
+    Route::post("/chat/conversations", [ChatApiController::class, "create"]);
+    Route::get("/chat/conversations/{id}", [ChatApiController::class, "show"]);
+    Route::delete("/chat/conversations/{id}", [
+        ChatApiController::class,
+        "destroy",
+    ]);
+    Route::post("/chat/store", [ChatApiController::class, "storeMessages"]);
+
+    Route::post("/chat/test", [ChatApiController::class, "test"]);
+    Route::post("/chat/teach", [ChatApiController::class, "teach"]);
 });

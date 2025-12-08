@@ -1,20 +1,29 @@
 <?php
 
-namespace App\Http\Controllers\Api;
+namespace App\Http\Controllers;
 
-use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Conversation;
 use App\Models\Message;
-use App\Http\Controllers\Api\QueryController; // add
 
 class ChatController extends Controller
 {
+    /**
+     * POST /api/chat/test
+     * body: { "message": "..." }
+     * ตอนนี้ให้ reuse QueryController ไปก่อน
+     */
     public function test(Request $request, QueryController $queryController)
     {
+        // คุณอาจเพิ่ม field พิเศษ เช่น debug = true เป็นต้น
         return $queryController->query($request);
     }
 
+    /**
+     * POST /api/chat/teach
+     * body: { "question": "...", "ideal_answer": "...", "notes": "optional" }
+     * ตอนนี้ยังไม่มี table สำหรับเก็บ, เอาเป็น log ไว้ก่อน
+     */
     public function teach(Request $request)
     {
         $data = $request->validate([
@@ -23,6 +32,7 @@ class ChatController extends Controller
             "notes" => "nullable|string",
         ]);
 
+        // เก็บลง log ไปก่อน (อนาคตค่อยสร้าง training_examples table)
         \Log::info("Manual teach example", $data);
 
         return response()->json([
@@ -30,17 +40,21 @@ class ChatController extends Controller
         ]);
     }
 
+    // GET /api/chat/conversations
     public function list(Request $request)
     {
-        $userId = $request->attributes->get("api_key");
+        $userId = $request->attributes->get("api_key"); // ตามที่เลือกไว้
         $convs = Conversation::where("user_id", $userId)
             ->orderByDesc("updated_at")
             ->limit(50)
             ->get();
 
-        return response()->json(["data" => $convs]);
+        return response()->json([
+            "data" => $convs,
+        ]);
     }
 
+    // POST /api/chat/conversations
     public function create(Request $request)
     {
         $userId = $request->attributes->get("api_key");
@@ -50,9 +64,12 @@ class ChatController extends Controller
             "user_id" => $userId,
         ]);
 
-        return response()->json(["data" => $conv]);
+        return response()->json([
+            "data" => $conv,
+        ]);
     }
 
+    // GET /api/chat/conversations/{id}
     public function show(Request $request, $id)
     {
         $userId = $request->attributes->get("api_key");
@@ -69,6 +86,7 @@ class ChatController extends Controller
         ]);
     }
 
+    // DELETE /api/chat/conversations/{id}
     public function destroy(Request $request, $id)
     {
         $userId = $request->attributes->get("api_key");
@@ -84,32 +102,40 @@ class ChatController extends Controller
         ]);
     }
 
+    // POST /api/chat/store
+    // body: { conversation_id, user_message, assistant_message }
     public function storeMessages(Request $request)
     {
         $userId = $request->attributes->get("api_key");
 
-        $conv = Conversation::where("id", $request->conversation_id)
+        $conversationId = (int) $request->input("conversation_id");
+        $conv = Conversation::where("id", $conversationId)
             ->where("user_id", $userId)
             ->firstOrFail();
 
-        if ($request->user_message) {
+        $userMessage = $request->input("user_message");
+        $assistantMessage = $request->input("assistant_message");
+
+        if ($userMessage) {
             Message::create([
                 "conversation_id" => $conv->id,
                 "role" => "user",
-                "content" => $request->user_message,
+                "content" => $userMessage,
             ]);
         }
 
-        if ($request->assistant_message) {
+        if ($assistantMessage) {
             Message::create([
                 "conversation_id" => $conv->id,
                 "role" => "assistant",
-                "content" => $request->assistant_message,
+                "content" => $assistantMessage,
             ]);
         }
 
-        $conv->touch();
+        $conv->touch(); // update updated_at
 
-        return response()->json(["message" => "Saved"]);
+        return response()->json([
+            "message" => "Messages saved",
+        ]);
     }
 }
