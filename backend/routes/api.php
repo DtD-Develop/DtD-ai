@@ -66,15 +66,27 @@ Route::middleware(["api-key", "api-log"])->group(function () {
         "recentQueries",
     ]);
 
-    Route::get("/chat/conversations", [ChatApiController::class, "list"]);
-    Route::post("/chat/conversations", [ChatApiController::class, "create"]);
-    Route::get("/chat/conversations/{id}", [ChatApiController::class, "show"]);
-    Route::delete("/chat/conversations/{id}", [
+    Route::get("/chat/conversations", [ChatApiController::class, "index"]);
+    Route::post("/chat/conversations", [
         ChatApiController::class,
-        "destroy",
+        "storeConversation",
     ]);
-    Route::post("/chat/store", [ChatApiController::class, "storeMessages"]);
+    Route::get("/chat/conversations/{conversation}", [
+        ChatApiController::class,
+        "showConversation",
+    ]);
+    Route::patch("/chat/conversations/{conversation}", [
+        ChatApiController::class,
+        "updateConversation",
+    ]);
+    Route::delete("/chat/conversations/{conversation}", [
+        ChatApiController::class,
+        "destroyConversation",
+    ]);
 
-    Route::post("/chat/test", [ChatApiController::class, "test"]);
-    Route::post("/chat/teach", [ChatApiController::class, "teach"]);
+    Route::post("/chat/message", [ChatApiController::class, "message"]);
+    Route::post("/chat/messages/{message}/rate", [
+        ChatApiController::class,
+        "rate",
+    ]);
 });
