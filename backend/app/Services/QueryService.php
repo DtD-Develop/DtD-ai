@@ -97,7 +97,25 @@ class QueryService
             "messages" => $messages,
         ]);
 
-        return $response->json("message.content");
+        if ($response->failed()) {
+            \Log::error("Ollama API Failed", [
+                "body" => $response->body(),
+            ]);
+            return "ขออภัย ฉันไม่สามารถตอบได้ตอนนี้";
+        }
+
+        $json = $response->json();
+
+        $content = $json["message"]["content"] ?? null;
+
+        if (!$content) {
+            \Log::error("Empty response from Ollama", [
+                "json" => $json,
+            ]);
+            return "ขออภัย ฉันไม่เข้าใจคำถาม";
+        }
+
+        return $content;
     }
 
     protected function buildKbPrompt(string $query, array $contextTexts): string
