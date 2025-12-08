@@ -10,6 +10,8 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 
+use App\Jobs\AnalyzeKbFileJob;
+
 class ParseKbFileJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
@@ -80,5 +82,8 @@ class ParseKbFileJob implements ShouldQueue
             "progress" => 60,
             "status" => "tagged",
         ]);
+
+        $this->release(1);
+        dispatch(new AnalyzeKbFileJob($this->kbFileId));
     }
 }
