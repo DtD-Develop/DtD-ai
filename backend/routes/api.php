@@ -29,9 +29,6 @@ Route::middleware(["api-key", "api-log"])->group(function () {
     Route::post("/chat/test", [ChatController::class, "test"]);
     Route::post("/chat/teach", [ChatController::class, "teach"]);
 
-    Route::post("/chat", [ChatController::class, "handle"]);
-    Route::post("/chat/{id}/rate", [ChatController::class, "rate"]);
-
     // KB upload / manage
     Route::post("/kb/upload", [KbController::class, "upload"]);
     Route::get("/kb/files", [KbController::class, "index"]);
@@ -63,29 +60,5 @@ Route::middleware(["api-key", "api-log"])->group(function () {
     Route::get("/dashboard/recent-queries", [
         DashboardController::class,
         "recentQueries",
-    ]);
-
-    Route::get("/chat/conversations", [ChatController::class, "index"]);
-    Route::post("/chat/conversations", [
-        ChatController::class,
-        "storeConversation",
-    ]);
-    Route::get("/chat/conversations/{conversation}", [
-        ChatController::class,
-        "showConversation",
-    ]);
-    Route::patch("/chat/conversations/{conversation}", [
-        ChatController::class,
-        "updateConversation",
-    ]);
-    Route::delete("/chat/conversations/{conversation}", [
-        ChatController::class,
-        "destroyConversation",
-    ]);
-
-    Route::post("/chat/message", [ChatController::class, "message"]);
-    Route::post("/chat/messages/{message}/rate", [
-        ChatController::class,
-        "rate",
     ]);
 });
