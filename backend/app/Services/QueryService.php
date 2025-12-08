@@ -25,92 +25,82 @@ class QueryService
     }
 
     /**
-     * ตอบคำถามจาก KB + LLM
-     *
-     * @param array $payload [
-     *   'query' => string,
-     *   'conversation_id' => int|null,
-     *   'top_k_kb' => int,
-     *   'min_kb_score' => float,
-     * ]
-     *
-     * @return array [
-     *   'text' => string,
-     *   'kb_hits' => array,
-     * ]
+     * @param array{
+     *   conversation_id?: int,
+     *   query?: string,
+     *   messages?: array<array{role:string,content:string}>
+     * } $payload
      */
     public function answer(array $payload): array
     {
-        $query = $payload["query"] ?? "";
-        $topK = $payload["top_k_kb"] ?? 5;
-        $minScore = $payload["min_kb_score"] ?? 0.3;
-        $collection = env("QDRANT_COLLECTION", "dtd_kb");
+        $conversationId = $payload["conversation_id"] ?? null;
+        $messages = $payload["messages"] ?? null;
+        $query = $payload["query"] ?? null;
 
-        // 1) เรียก ingest เพื่อ embed query เป็น vector
-        $embedRes = Http::post(
-            rtrim($this->ingestEndpoint, "/") . "/embed-text",
-            [
-                "text" => $query,
-            ],
-        );
+        // ถ้า frontend / code เก่า ส่งมาแค่ query → สร้าง messages ให้เอง
+        if ($messages === null) {
+            if ($query === null) {
+                throw new \InvalidArgumentException(
+                    'Either "messages" or "query" is required.',
+                );
+            }
 
-        if (!$embedRes->ok()) {
-            // fallback ไป LLM เปล่า ๆ
-            return [
-                "text" => $this->callLlmPlain($query),
-                "kb_hits" => [],
+            $messages = [
+                [
+                    "role" => "user",
+                    "content" => $query,
+                ],
             ];
         }
 
-        $vector = $embedRes->json("vector") ?? [];
+        // ---- จากตรงนี้ไป ใช้ $messages เป็นหลัก ----
+        // ตรงนี้เอาไปต่อกับ logic เดิมของคุณ เช่น RAG + LLM
+        // ตัวอย่าง pseudo-code:
 
-        // 2) ค้นใน Qdrant
-        $searchRes = Http::post(
-            rtrim($this->qdrantUrl, "/") .
-                "/collections/" .
-                $collection .
-                "/points/search",
-            [
-                "vector" => $vector,
-                "limit" => $topK,
-                "with_payload" => true,
-            ],
-        );
+        /*
+             $ragResult = $this->kbService->searchRelevantDocs($messages, $conversationId);
 
-        $hits = [];
-        if ($searchRes->ok()) {
-            $hits = collect($searchRes->json("result") ?? [])
-                ->filter(fn($hit) => ($hit["score"] ?? 0) >= $minScore)
-                ->values()
-                ->all();
-        }
+             $llmResponse = $this->llmClient->chat([
+                 'model' => '...',
+                 'messages' => array_merge(
+                     [
+                         [
+                             'role' => 'system',
+                             'content' => 'You are ...',
+                         ],
+                     ],
+                     $messages
+                 ),
+                 'kb_context' => $ragResult,
+             ]);
+             */
 
-        // 3) สร้าง prompt ให้ LLM
-        if (empty($hits)) {
-            // ไม่มี KB context → ตอบแบบทั่วไป
-            return [
-                "text" => $this->callLlmPlain($query),
-                "kb_hits" => [],
-            ];
-        }
-
-        $contextTexts = collect($hits)
-            ->map(function ($hit) {
-                $payload = $hit["payload"] ?? [];
-                return $payload["text"] ?? "";
-            })
-            ->filter()
-            ->values()
-            ->all();
-
-        $prompt = $this->buildKbPrompt($query, $contextTexts);
-
-        $answer = $this->callLlmWithPrompt($prompt);
+        // สมมติสุดท้ายได้ text กับ kb_hits กลับมา:
+        $text = $this->callYourLlmAndGetText($messages, $conversationId);
+        $kbHits = []; // หรือจาก RAG จริงของคุณ
 
         return [
-            "text" => $answer,
-            "kb_hits" => $hits,
+            "text" => $text,
+            "kb_hits" => $kbHits,
         ];
+    }
+
+    /**
+     * ตรงนี้แทนที่ด้วยการเรียก LLM จริงของคุณ (OpenAI / Ollama / อะไรก็ได้)
+     */
+    protected function callYourLlmAndGetText(
+        array $messages,
+        ?int $conversationId,
+    ): string {
+        // TODO: เอาโค้ดเดิมของคุณมาใส่ตรงนี้
+        // ปัจจุบันคุณน่าจะใช้แค่ $query ตัวเดียว → เปลี่ยนมาใช้ $messages
+        // เช่น เอา content ล่าสุดเป็น query หลัก ถ้า logic เดิมต้องใช้
+
+        $lastUserMessage =
+            collect($messages)->where("role", "user")->last()["content"] ?? "";
+
+        // ตัวอย่าง dummy:
+        return "ตอบจาก LLM ของคุณ: " . $lastUserMessage;
     }
 
     protected function buildKbPrompt(string $query, array $contextTexts): string

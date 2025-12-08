@@ -18,6 +18,7 @@ class Conversation extends Model
     protected $casts = [
         "is_title_generated" => "boolean",
         "last_message_at" => "datetime",
+        "memory" => "array",
     ];
 
     public function messages(): HasMany

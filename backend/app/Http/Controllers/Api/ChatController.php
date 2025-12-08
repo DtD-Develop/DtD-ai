@@ -9,10 +9,14 @@ use App\Services\QueryService;
 use App\Jobs\PromoteChatMessageToKbJob;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
+use App\Services\ConversationMemoryService;
 
 class ChatController extends Controller
 {
-    public function __construct(protected QueryService $queryService) {}
+    public function __construct(
+        protected QueryService $queryService,
+        protected ConversationMemoryService $memoryService,
+    ) {}
 
     /**
      * GET /api/chat/conversations
@@ -163,23 +167,60 @@ class ChatController extends Controller
             \App\Jobs\GenerateConversationTitleJob::dispatch($conversation->id);
         }
 
-        // 2) เซฟ user message
+        // 2) เซฟ user message ก่อน
         $userMsg = $conversation->messages()->create([
             "role" => "user",
             "content" => $data["message"],
         ]);
 
-        // 3) เรียก QueryService ให้ตอบ
+        // 3) ดึง history ทั้งห้อง (รวมข้อความที่พึ่งเซฟ)
+        $history = $conversation
+            ->messages()
+            ->orderBy("id")
+            ->get()
+            ->map(function ($m) {
+                return [
+                    "role" => $m->role, // 'user' หรือ 'assistant'
+                    "content" => $m->content,
+                ];
+            })
+            ->toArray();
+
+        // 4) สร้าง system memory จาก Memory Engine (เช่น ชื่อ, ข้อมูลสำคัญ)
+        $memoryPrompt = $this->memoryService->buildMemoryPrompt($conversation);
+
+        $llmMessages = [];
+
+        if (!empty($memoryPrompt)) {
+            $llmMessages[] = [
+                "role" => "system",
+                "content" => $memoryPrompt,
+            ];
+        }
+
+        // ต่อด้วย history ปกติ
+        $llmMessages = array_merge($llmMessages, $history);
+
+        // 5) เรียก QueryService ให้ตอบ โดยส่งทั้ง messages + conversation_id
         $answer = $this->queryService->answer([
-            "query" => $data["message"],
             "conversation_id" => $conversation->id,
+            "messages" => $llmMessages,
+            // เผื่อ QueryService เก่าใช้ 'query' อยู่ ยังส่งให้ด้วย
+            "query" => $data["message"],
         ]);
 
-        // 4) เซฟ assistant message
+        // 6) เซฟ assistant message
         $assistantMsg = $conversation->messages()->create([
             "role" => "assistant",
             "content" => $answer["text"],
         ]);
+
+        // 7) อัปเดต memory จากคู่ user + assistant ล่าสุด
+        $this->memoryService->updateMemoryFromExchange(
+            $conversation,
+            $userMsg,
+            $assistantMsg,
+        );
 
         $conversation->last_message_at = now();
         $conversation->save();
