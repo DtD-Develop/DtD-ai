@@ -92,15 +92,12 @@ class QueryService
         array $messages,
         ?int $conversationId,
     ): string {
-        // TODO: เอาโค้ดเดิมของคุณมาใส่ตรงนี้
-        // ปัจจุบันคุณน่าจะใช้แค่ $query ตัวเดียว → เปลี่ยนมาใช้ $messages
-        // เช่น เอา content ล่าสุดเป็น query หลัก ถ้า logic เดิมต้องใช้
+        $response = Http::post("http://ollama:11434/api/chat", [
+            "model" => "llama3:8b",
+            "messages" => $messages,
+        ]);
 
-        $lastUserMessage =
-            collect($messages)->where("role", "user")->last()["content"] ?? "";
-
-        // ตัวอย่าง dummy:
-        return "ตอบจาก LLM ของคุณ: " . $lastUserMessage;
+        return $response->json("message.content");
     }
 
     protected function buildKbPrompt(string $query, array $contextTexts): string
