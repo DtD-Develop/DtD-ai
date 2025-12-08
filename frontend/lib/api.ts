@@ -39,11 +39,12 @@ async function apiFetch<T>(
     headers: {
       "Content-Type": "application/json",
       "X-API-KEY": API_KEY,
+      "X-API-TEST": "Test",
       ...(options.headers || {}),
     },
     cache: "no-store",
   });
-
+  console.log(API_KEY);
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`API error ${res.status}: ${text}`);
@@ -89,7 +90,6 @@ export const chatApi = {
     answer: string;
     kb_hits: any[];
   }> {
-    console.log(API_KEY);
     return apiFetch("/api/chat/message", {
       method: "POST",
       body: JSON.stringify(payload),
