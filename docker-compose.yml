@@ -1,5 +1,6 @@
 services:
   mysql:
+    container_name: mysql
     image: mysql:8
     environment:
       MYSQL_ROOT_PASSWORD: root
@@ -14,11 +15,13 @@ services:
       retries: 10
 
   redis:
+    container_name: redis
     image: redis:alpine
     networks:
       - app-network
 
   backend:
+    container_name: backend
     build:
       context: ./backend
     environment:
@@ -48,6 +51,7 @@ services:
       - "9000"
 
   horizon:
+    container_name: horizon
     build:
       context: ./backend
       dockerfile: Dockerfile.horizon
@@ -57,6 +61,7 @@ services:
       - app-network
 
   frontend:
+    container_name: frontend
     build:
       context: ./frontend
       args:
@@ -70,6 +75,7 @@ services:
       - "3000"
 
   ingest:
+    container_name: ingest
     build:
       context: ./ingest_service
     depends_on:
@@ -82,6 +88,7 @@ services:
       - "8001:8001"
 
   qdrant:
+    container_name: qdrant
     image: qdrant/qdrant:v1.11.0
     volumes:
       - qdrant_data:/qdrant/storage
@@ -104,6 +111,7 @@ services:
       - "11434"
 
   nginx:
+    container_name: nginx
     image: nginx:alpine
     ports:
       - "80:80"
@@ -117,6 +125,7 @@ services:
       - app-network
 
   n8n:
+    container_name: n8n
     image: n8nio/n8n
     restart: always
     environment:
