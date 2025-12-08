@@ -48,6 +48,16 @@ export default function UploadKbPage() {
     () => files.find((f) => f.id === selectedFileId) || null,
     [files, selectedFileId],
   );
+  const [theme, setTheme] = useState(
+    typeof window !== "undefined"
+      ? localStorage.getItem("theme") || "dark"
+      : "dark",
+  );
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", theme === "dark");
+    localStorage.setItem("theme", theme);
+  }, [theme]);
 
   // โหลดไฟล์ KB ครั้งแรก + polling
   useEffect(() => {
@@ -308,6 +318,29 @@ export default function UploadKbPage() {
   }, [selectedFile]);
 
   const logsForSelected = buildLogs(selectedFile);
+  useEffect(() => {
+    if (!selectedFileId || !API_URL || !API_KEY) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/kb/files/${selectedFileId}`, {
+          headers: {
+            "X-API-KEY": API_KEY,
+          },
+        });
+        const json = await res.json();
+        if (json?.data) {
+          setFiles((prev) =>
+            prev.map((f) => (f.id === json.data.id ? json.data : f)),
+          );
+        }
+      } catch (e) {
+        console.error("Failed to update progress", e);
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [selectedFileId]);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 p-4 md:p-8">

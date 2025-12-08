@@ -9,6 +9,8 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Contracts\Queue\ShouldQueue;
 
+use App\Jobs\AnalyzeKbFileJob;
+
 class EmbedKbFileJob implements ShouldQueue
 {
     use InteractsWithQueue, Queueable, SerializesModels;
@@ -42,5 +44,8 @@ class EmbedKbFileJob implements ShouldQueue
             "progress" => 100,
             "status" => "ready",
         ]);
+
+        $this->release(1);
+        dispatch(new AnalyzeKbFileJob($this->kbFileId));
     }
 }
