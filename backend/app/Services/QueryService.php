@@ -95,6 +95,7 @@ class QueryService
         $response = Http::post("http://ollama:11434/api/chat", [
             "model" => "llama3.1:8b",
             "messages" => $messages,
+            "stream" => false,
         ]);
 
         if ($response->failed()) {
@@ -111,6 +112,9 @@ class QueryService
         if (!$content) {
             \Log::error("Empty response from Ollama", [
                 "json" => $json,
+            ]);
+            \Log::info("Ollama raw response", [
+                "body" => $response->body(),
             ]);
             return "ขออภัย ฉันไม่เข้าใจคำถาม";
         }
