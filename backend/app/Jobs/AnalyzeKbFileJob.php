@@ -20,56 +20,114 @@ class AnalyzeKbFileJob implements ShouldQueue
 
     public function __construct(public int $kbFileId) {}
 
+    //     public function handle()
+    //     {
+    //         $kbFile = KbFile::findOrFail($this->kbFileId);
+
+    //         // Set status to tagged while analyzing
+    //         $kbFile->update([
+    //             "status" => "tagged",
+    //             "progress" => 70,
+    //         ]);
+
+    //         // ดึง chunks มาไม่เกิน 20 ชิ้นเพื่อประสิทธิภาพ
+    //         $chunks = KbChunk::where("kb_file_id", $this->kbFileId)
+    //             ->limit(20)
+    //             ->pluck("content")
+    //             ->toArray();
+
+    //         $collectedKeywords = collect();
+
+    //         foreach ($chunks as $text) {
+    //             // จำกัดข้อความไม่ให้ยาวเกินไป (LLM safe)
+    //             $text = substr($text, 0, 2000);
+
+    //             $prompt = "Extract up to 8 clear, meaningful ENGLISH keywords from the text below.
+    // Use single words only. Do not include Thai language.
+    // Return JSON array of strings only (example: [\"logistics\", \"shipping\"]).
+    // Text: \"$text\"";
+
+    //             $response = Http::post("http://ollama:11434/api/generate", [
+    //                 "model" => "llama3.1:8b",
+    //                 "prompt" => $prompt,
+    //             ]);
+
+    //             $keywords = json_decode($response->json("response") ?? "[]", true);
+
+    //             if (is_array($keywords)) {
+    //                 $collectedKeywords = $collectedKeywords->merge($keywords);
+    //             }
+    //         }
+
+    //         // 🔹 Clean + Unique
+    //         $finalKeywords = $collectedKeywords
+    //             ->map(fn($w) => strtolower(trim($w)))
+    //             ->filter(fn($w) => strlen($w) > 1 && ctype_alpha($w))
+    //             ->unique()
+    //             ->values()
+    //             ->take(10); // Max 10 tags
+
+    //         $kbFile->update([
+    //             "auto_tags" => $finalKeywords->toArray(),
+    //             "progress" => 90,
+    //         ]);
+    //     }
+    //
     public function handle()
     {
-        $kbFile = KbFile::findOrFail($this->kbFileId);
+        $kb = KbFile::find($this->kbFileId);
+        if (!$kb) {
+            return;
+        }
 
-        // Set status to tagged while analyzing
-        $kbFile->update([
-            "status" => "tagged",
-            "progress" => 70,
+        // If has ingester tags, do nothing
+        if (!empty($kb->auto_tags)) {
+            return $kb->update([
+                "progress" => 70,
+            ]);
+        }
+
+        $kb->update([
+            "progress" => 65,
         ]);
 
-        // ดึง chunks มาไม่เกิน 20 ชิ้นเพื่อประสิทธิภาพ
-        $chunks = KbChunk::where("kb_file_id", $this->kbFileId)
+        $chunks = \App\Models\KbChunk::where("kb_file_id", $kb->id)
             ->limit(20)
             ->pluck("content")
             ->toArray();
 
-        $collectedKeywords = collect();
-
-        foreach ($chunks as $text) {
-            // จำกัดข้อความไม่ให้ยาวเกินไป (LLM safe)
-            $text = substr($text, 0, 2000);
-
-            $prompt = "Extract up to 8 clear, meaningful ENGLISH keywords from the text below.
-Use single words only. Do not include Thai language.
-Return JSON array of strings only (example: [\"logistics\", \"shipping\"]).
-Text: \"$text\"";
-
-            $response = Http::post("http://ollama:11434/api/generate", [
-                "model" => "llama3.1:8b",
-                "prompt" => $prompt,
+        if (count($chunks) === 0) {
+            return $kb->update([
+                "progress" => 70,
             ]);
-
-            $keywords = json_decode($response->json("response") ?? "[]", true);
-
-            if (is_array($keywords)) {
-                $collectedKeywords = $collectedKeywords->merge($keywords);
-            }
         }
 
-        // 🔹 Clean + Unique
-        $finalKeywords = $collectedKeywords
+        $text = substr(implode(" ", $chunks), 0, 3000);
+
+        $prompt = <<<PROMPT
+        Extract meaningful English keywords from the following text.
+        Return ONLY a JSON array of strings. No Thai.
+        Text: "$text"
+        PROMPT;
+
+        $res = Http::post(env("OLLAMA_URL") . "/api/generate", [
+            "model" => env("OLLAMA_MODEL", "llama3.1:8b"),
+            "prompt" => $prompt,
+        ]);
+
+        $keywords = json_decode($res->json("response") ?? "[]", true);
+
+        $keywords = collect($keywords)
             ->map(fn($w) => strtolower(trim($w)))
             ->filter(fn($w) => strlen($w) > 1 && ctype_alpha($w))
             ->unique()
+            ->take(10)
             ->values()
-            ->take(10); // Max 10 tags
+            ->toArray();
 
-        $kbFile->update([
-            "auto_tags" => $finalKeywords->toArray(),
-            "progress" => 90,
+        $kb->update([
+            "auto_tags" => $keywords,
+            "progress" => 75,
         ]);
     }
 }

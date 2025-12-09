@@ -19,6 +19,11 @@ class EmbedKbFileJob implements ShouldQueue
 
     public function handle()
     {
+        $kb->update([
+            "status" => "embedding",
+            "progress" => 80,
+        ]);
+
         $kb = KbFile::find($this->kbFileId);
         if (!$kb) {
             return;
@@ -44,8 +49,5 @@ class EmbedKbFileJob implements ShouldQueue
             "progress" => 100,
             "status" => "ready",
         ]);
-
-        $this->release(1);
-        dispatch(new AnalyzeKbFileJob($this->kbFileId));
     }
 }
