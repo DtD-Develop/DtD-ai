@@ -35,10 +35,12 @@ class KbController extends Controller
         $uploaded = [];
 
         foreach ($request->file("files") as $file) {
-            $path = $file->store("uploads"); // เก็บใน storage/app/uploads
+            $extension = $file->getClientOriginalExtension(); // เก็บ .md หรือ .txt
+            $randomName = uniqid() . "." . $extension;
+            $path = $file->storeAs("uploads", $randomName);
 
             $kb = KbFile::create([
-                "filename" => basename($path),
+                "filename" => $randomName,
                 "original_name" => $file->getClientOriginalName(),
                 "mime_type" => $file->getMimeType(),
                 "size_bytes" => $file->getSize(),
