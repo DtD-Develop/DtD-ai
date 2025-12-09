@@ -19,6 +19,10 @@ return [
         "token" => env("POSTMARK_TOKEN"),
     ],
 
+    "ingest" => [
+        "url" => env("INGEST_URL", "http://ingest:8001"),
+    ],
+
     "ses" => [
         "key" => env("AWS_ACCESS_KEY_ID"),
         "secret" => env("AWS_SECRET_ACCESS_KEY"),
