@@ -22,7 +22,7 @@ class QueryController
         $minScore = floatval($request->input("min_kb_score", 0.2));
 
         $qdrantUrl = env("QDRANT_HOST", "http://qdrant:6333");
-        $ingestUrl = env("INGEST_ENDPOINT", "http://ingest:8001");
+        $ingestUrl = env("INGEST_URL", "http://ingest:8001");
         $ollamaUrl = env("OLLAMA_URL", "http://ollama:11434");
         $ollamaModel = env("OLLAMA_MODEL", "llama3.1:8b");
         $collection = env("QDRANT_COLLECTION", "dtd_kb");
