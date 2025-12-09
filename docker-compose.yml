@@ -84,6 +84,8 @@ services:
       - ollama
     networks:
       - app-network
+    volumes:
+      - storage_data:/var/www/html/storage
     ports:
       - "8001:8001"
 
