@@ -44,6 +44,9 @@ export default function UploadKbPage() {
   const [autoTagInput, setAutoTagInput] = useState("");
   const [message, setMessage] = useState<string | null>(null);
 
+  const [tagDirty, setTagDirty] = useState(false);
+  const [autoTagDirty, setAutoTagDirty] = useState(false);
+
   const selectedFile = useMemo(
     () => files.find((f) => f.id === selectedFileId) || null,
     [files, selectedFileId],
@@ -325,11 +328,21 @@ export default function UploadKbPage() {
     if (!selectedFile) {
       setTagInput("");
       setAutoTagInput("");
+      setTagDirty(false);
+      setAutoTagDirty(false);
       return;
+    }
+
+    if (!tagDirty) {
+      setTagInput((selectedFile.tags || []).join(", "));
+    }
+
+    if (!autoTagDirty) {
+      setAutoTagInput((selectedFile.auto_tags || []).join(", "));
     }
     setTagInput((selectedFile.tags || []).join(", "));
     setAutoTagInput((selectedFile.auto_tags || []).join(", "));
-  }, [selectedFile]);
+  }, [selectedFile, tagDirty, autoTagDirty]);
 
   const logsForSelected = buildLogs(selectedFile);
 
@@ -555,7 +568,10 @@ export default function UploadKbPage() {
                     className="w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] outline-none dark:border-slate-700 dark:bg-slate-950"
                     placeholder="tag1, tag2, tag3"
                     value={tagInput}
-                    onChange={(e) => setTagInput(e.target.value)}
+                    onChange={(e) => {
+                      setTagDirty(true);
+                      setTagInput(e.target.value);
+                    }}
                   />
                 </div>
                 <div className="mb-3">
@@ -566,7 +582,10 @@ export default function UploadKbPage() {
                     className="w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] outline-none dark:border-slate-700 dark:bg-slate-950"
                     placeholder="auto tags (optional)"
                     value={autoTagInput}
-                    onChange={(e) => setAutoTagInput(e.target.value)}
+                    onChange={(e) => {
+                      setAutoTagDirty(true);
+                      setAutoTagInput(e.target.value);
+                    }}
                   />
                 </div>
                 <div className="mb-4">
