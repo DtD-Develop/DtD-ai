@@ -29,11 +29,14 @@ class EmbedKbFileJob implements ShouldQueue
             return;
         }
 
-        $resp = Http::timeout(300)->post(env("INGEST_ENDPOINT") . "/embed", [
-            "file_path" => storage_path("app/" . $kb->storage_path),
-            "tags" => $kb->tags ?: $kb->auto_tags,
-            "kb_file_id" => $kb->id,
-        ]);
+        $resp = Http::timeout(300)->post(
+            config("services.ingest.url") . "/embed",
+            [
+                "file_path" => storage_path("app/" . $kb->storage_path),
+                "tags" => $kb->tags ?: $kb->auto_tags,
+                "kb_file_id" => $kb->id,
+            ],
+        );
 
         if ($resp->failed()) {
             return $kb->update([

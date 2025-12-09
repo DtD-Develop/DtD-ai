@@ -15,7 +15,7 @@ class QueryService
     ) {
         $this->ingestEndpoint =
             $this->ingestEndpoint ?:
-            config("services.ingest.endpoint", env("INGEST_ENDPOINT"));
+            config("services.ingest.endpoint", config("services.ingest.url"));
         $this->qdrantUrl =
             $this->qdrantUrl ?: env("QDRANT_URL", "http://qdrant:6333");
         $this->ollamaUrl =

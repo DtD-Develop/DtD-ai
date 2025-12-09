@@ -30,7 +30,7 @@ class ParseKbFileJob implements ShouldQueue
     //         "progress" => 30,
     //     ]);
 
-    //     $resp = Http::timeout(300)->post(env("INGEST_ENDPOINT") . "/parse", [
+    //     $resp = Http::timeout(300)->post(config("services.ingest.url") . "/parse", [
     //         "file_path" => storage_path("app/" . $kb->storage_path),
     //     ]);
 
@@ -102,9 +102,12 @@ class ParseKbFileJob implements ShouldQueue
             "progress" => 30,
         ]);
 
-        $resp = Http::timeout(300)->post(env("INGEST_ENDPOINT") . "/parse", [
-            "file_path" => storage_path("app/" . $kb->storage_path),
-        ]);
+        $resp = Http::timeout(300)->post(
+            config("services.ingest.url") . "/parse",
+            [
+                "file_path" => storage_path("app/" . $kb->storage_path),
+            ],
+        );
 
         if ($resp->failed()) {
             return $kb->update([
