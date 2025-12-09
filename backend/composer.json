@@ -6,8 +6,8 @@
         "laravel/framework": "^12.0",
         "guzzlehttp/guzzle": "^7.0",
         "predis/predis": "^1.1",
-        "laravel/horizon": "^5.40",
-        "laravel/tinker": "*"
+        "laravel/tinker": "*",
+        "laravel/horizon": "^5.40"
     },
     "autoload": {
         "psr-4": {
