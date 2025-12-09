@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
-import echo from "@/lib/echo";
+import { getEcho } from "@/lib/echo";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY;
@@ -127,7 +127,10 @@ export default function UploadKbPage() {
   }, [selectedFileId]);
 
   useEffect(() => {
-    const channel = echo.channel("kb-files");
+    const e = getEcho();
+    if (!e) return;
+
+    const channel = e.channel("kb-files");
 
     channel
       .subscribed(() => {
@@ -141,7 +144,6 @@ export default function UploadKbPage() {
           prev.map((f) => (f.id === updated.id ? updated : f)),
         );
 
-        // If this is the file user is editing: update status, progress only
         if (updated.id === selectedFileId && isEditing) {
           setFiles((prev) =>
             prev.map((f) =>
@@ -163,7 +165,7 @@ export default function UploadKbPage() {
       });
 
     return () => {
-      echo.leaveChannel("kb-files");
+      e.leaveChannel("kb-files");
     };
   }, [selectedFileId, isEditing]);
 

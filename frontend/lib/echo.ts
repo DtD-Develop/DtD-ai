@@ -9,18 +9,24 @@ declare global {
   }
 }
 
-if (typeof window !== "undefined") {
-  window.Pusher = Pusher;
+let echoInstance: Echo | null = null;
+
+export function getEcho(): Echo | null {
+  if (typeof window === "undefined") return null;
+
+  if (!echoInstance) {
+    window.Pusher = Pusher;
+
+    echoInstance = new Echo({
+      broadcaster: "pusher",
+      key: process.env.NEXT_PUBLIC_REVERB_KEY,
+      wsHost: process.env.NEXT_PUBLIC_REVERB_HOST,
+      wsPort: Number(process.env.NEXT_PUBLIC_REVERB_PORT || 80),
+      forceTLS: false,
+      encrypted: false,
+      disableStats: true,
+    });
+  }
+
+  return echoInstance;
 }
-
-const echo = new Echo({
-  broadcaster: "pusher",
-  key: process.env.NEXT_PUBLIC_REVERB_KEY,
-  wsHost: process.env.NEXT_PUBLIC_REVERB_HOST,
-  wsPort: Number(process.env.NEXT_PUBLIC_REVERB_PORT || 80),
-  forceTLS: false,
-  encrypted: false,
-  disableStats: true,
-});
-
-export default echo;
