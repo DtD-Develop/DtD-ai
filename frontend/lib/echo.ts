@@ -9,9 +9,9 @@ declare global {
   }
 }
 
-let echoInstance: Echo | null = null;
+let echoInstance: any = null;
 
-export function getEcho(): Echo | null {
+export function getEcho(): any | null {
   if (typeof window === "undefined") return null;
 
   if (!echoInstance) {
