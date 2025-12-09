@@ -9,8 +9,6 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Contracts\Queue\ShouldQueue;
 
-use App\Jobs\AnalyzeKbFileJob;
-
 class EmbedKbFileJob implements ShouldQueue
 {
     use InteractsWithQueue, Queueable, SerializesModels;
@@ -19,24 +17,35 @@ class EmbedKbFileJob implements ShouldQueue
 
     public function handle()
     {
-        $kb->update([
-            "status" => "embedding",
-            "progress" => 80,
-        ]);
-
         $kb = KbFile::find($this->kbFileId);
         if (!$kb) {
             return;
         }
 
-        $resp = Http::timeout(300)->post(
-            config("services.ingest.url") . "/embed",
-            [
+        // กันไว้ เผื่อมี job เก่าเรียกซ้ำ
+        $kb->update([
+            "status" => "embedding",
+            "progress" => 80,
+        ]);
+
+        $ingestUrl = config("services.ingest.url"); // ✅ ใช้ config เดียวกับ Parse
+
+        try {
+            $resp = Http::timeout(300)->post($ingestUrl . "/embed", [
                 "file_path" => storage_path("app/" . $kb->storage_path),
                 "tags" => $kb->tags ?: $kb->auto_tags,
                 "kb_file_id" => $kb->id,
-            ],
-        );
+            ]);
+        } catch (\Throwable $e) {
+            // ถ้า network/Qdrant พัง ให้ log ลง DB ด้วย
+            $kb->update([
+                "status" => "failed",
+                "error_message" => $e->getMessage(),
+            ]);
+
+            // ส่งต่อให้ Laravel mark job ว่า failed (จะเห็นใน queue:failed)
+            throw $e;
+        }
 
         if ($resp->failed()) {
             return $kb->update([
