@@ -105,7 +105,7 @@ class ParseKbFileJob implements ShouldQueue
         $resp = Http::timeout(300)->post(
             config("services.ingest.url") . "/parse",
             [
-                "file_path" => storage_path("app/" . $kb->storage_path),
+                "file_path" => storage_path("app/uploads/" . $kb->storage_path),
             ],
         );
 

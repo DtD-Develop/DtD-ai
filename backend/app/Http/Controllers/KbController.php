@@ -35,7 +35,7 @@ class KbController extends Controller
         $uploaded = [];
 
         foreach ($request->file("files") as $file) {
-            $path = $file->store("kb-files"); // เก็บใน storage/app/kb-files
+            $path = $file->store("uploads"); // เก็บใน storage/app/uploads
 
             $kb = KbFile::create([
                 "filename" => basename($path),
