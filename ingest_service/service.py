@@ -2,6 +2,7 @@ import mimetypes
 import os
 from pathlib import Path
 from typing import List, Optional
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -211,7 +212,7 @@ def embed(req: EmbedRequest):
     ensure_collection()
 
     vectors = model.encode(chunks, batch_size=16).tolist()
-    ids = [f"{req.kb_file_id}_{i}" for i in range(len(chunks))]
+    ids = [str(uuid4()) for _ in range(len(chunks))]
 
     qdrant.upsert(
         collection_name=QDRANT_COLLECTION,

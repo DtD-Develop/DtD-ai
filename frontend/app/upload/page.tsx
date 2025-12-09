@@ -332,14 +332,6 @@ export default function UploadKbPage() {
       setAutoTagDirty(false);
       return;
     }
-
-    if (!tagDirty) {
-      setTagInput((selectedFile.tags || []).join(", "));
-    }
-
-    if (!autoTagDirty) {
-      setAutoTagInput((selectedFile.auto_tags || []).join(", "));
-    }
     setTagInput((selectedFile.tags || []).join(", "));
     setAutoTagInput((selectedFile.auto_tags || []).join(", "));
   }, [selectedFile, tagDirty, autoTagDirty]);
