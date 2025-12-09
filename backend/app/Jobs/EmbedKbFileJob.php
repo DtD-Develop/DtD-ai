@@ -27,7 +27,6 @@ class EmbedKbFileJob implements ShouldQueue
             "status" => "embedding",
             "progress" => 80,
         ]);
-        event(new \App\Events\KbFileUpdated($kbFile));
 
         $ingestUrl = config("services.ingest.url"); // ✅ ใช้ config เดียวกับ Parse
 
@@ -43,7 +42,6 @@ class EmbedKbFileJob implements ShouldQueue
                 "status" => "failed",
                 "error_message" => $e->getMessage(),
             ]);
-            event(new \App\Events\KbFileUpdated($kbFile));
 
             // ส่งต่อให้ Laravel mark job ว่า failed (จะเห็นใน queue:failed)
             throw $e;
@@ -54,7 +52,6 @@ class EmbedKbFileJob implements ShouldQueue
                 "status" => "failed",
                 "error_message" => $resp->body(),
             ]);
-            event(new \App\Events\KbFileUpdated($kbFile));
         }
 
         $res = $resp->json();
@@ -64,6 +61,5 @@ class EmbedKbFileJob implements ShouldQueue
             "progress" => 100,
             "status" => "ready",
         ]);
-        event(new \App\Events\KbFileUpdated($kbFile));
     }
 }

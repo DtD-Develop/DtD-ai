@@ -101,7 +101,6 @@ class ParseKbFileJob implements ShouldQueue
             "status" => "parsing",
             "progress" => 30,
         ]);
-        event(new \App\Events\KbFileUpdated($kbFile));
 
         $resp = Http::timeout(300)->post(
             config("services.ingest.url") . "/parse",
@@ -115,7 +114,6 @@ class ParseKbFileJob implements ShouldQueue
                 "status" => "failed",
                 "error_message" => $resp->body(),
             ]);
-            event(new \App\Events\KbFileUpdated($kbFile));
         }
 
         $parseResult = $resp->json();
@@ -127,7 +125,6 @@ class ParseKbFileJob implements ShouldQueue
             "status" => "tagged",
             "progress" => $ingestTags ? 65 : 50, // 🚀 If has tags → skip ahead
         ]);
-        event(new \App\Events\KbFileUpdated($kbFile));
 
         dispatch(new AnalyzeKbFileJob($kb->id));
     }

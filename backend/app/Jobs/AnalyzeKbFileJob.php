@@ -85,13 +85,11 @@ class AnalyzeKbFileJob implements ShouldQueue
             return $kb->update([
                 "progress" => 70,
             ]);
-            event(new \App\Events\KbFileUpdated($kbFile));
         }
 
         $kb->update([
             "progress" => 65,
         ]);
-        event(new \App\Events\KbFileUpdated($kbFile));
 
         $chunks = \App\Models\KbChunk::where("kb_file_id", $kb->id)
             ->limit(20)
@@ -102,7 +100,6 @@ class AnalyzeKbFileJob implements ShouldQueue
             return $kb->update([
                 "progress" => 70,
             ]);
-            event(new \App\Events\KbFileUpdated($kbFile));
         }
 
         $text = substr(implode(" ", $chunks), 0, 3000);
@@ -132,6 +129,5 @@ class AnalyzeKbFileJob implements ShouldQueue
             "auto_tags" => $keywords,
             "progress" => 75,
         ]);
-        event(new \App\Events\KbFileUpdated($kbFile));
     }
 }

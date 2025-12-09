@@ -48,9 +48,6 @@ export default function UploadKbPage() {
   const [tagDirty, setTagDirty] = useState(false);
   const [autoTagDirty, setAutoTagDirty] = useState(false);
 
-  const [isEditing, setIsEditing] = useState(false);
-  const [wsConnected, setWsConnected] = useState(false);
-
   const selectedFile = useMemo(
     () => files.find((f) => f.id === selectedFileId) || null,
     [files, selectedFileId],
@@ -60,39 +57,31 @@ export default function UploadKbPage() {
   useEffect(() => {
     if (!API_URL || !API_KEY) return;
 
-    // const fetchFiles = async () => {
-    //   try {
-    //     setLoading(true);
-    //     const res = await fetch(`${API_URL}/api/kb/files?per_page=50`, {
-    //       headers: {
-    //         "X-API-KEY": API_KEY,
-    //       },
-    //     });
-    //     const json: PaginatedResponse = await res.json();
-    //     setFiles(json.data || []);
-    //   } catch (e) {
-    //     console.error("Failed to load KB files", e);
-    //   } finally {
-    //     setLoading(false);
-    //   }
-    // };
-    //
     const fetchFiles = async () => {
-      const res = await fetch(`${API_URL}/api/kb/files?per_page=50`, {
-        headers: { "X-API-KEY": API_KEY },
-      });
-      const json: PaginatedResponse = await res.json();
-      setFiles(json.data || []);
+      try {
+        setLoading(true);
+        const res = await fetch(`${API_URL}/api/kb/files?per_page=50`, {
+          headers: {
+            "X-API-KEY": API_KEY,
+          },
+        });
+        const json: PaginatedResponse = await res.json();
+        setFiles(json.data || []);
+      } catch (e) {
+        console.error("Failed to load KB files", e);
+      } finally {
+        setLoading(false);
+      }
     };
 
     fetchFiles();
-    // const timer = setInterval(fetchFiles, 5000);
-    // return () => clearInterval(timer);
+    const timer = setInterval(fetchFiles, 5000);
+    return () => clearInterval(timer);
   }, []);
 
   // 🔄 polling progress เฉพาะไฟล์ที่เลือกอยู่ ทุก 2 วิ
   useEffect(() => {
-    if (wsConnected) return;
+    if (!selectedFileId || !API_URL || !API_KEY) return;
 
     const interval = setInterval(async () => {
       try {
@@ -104,18 +93,7 @@ export default function UploadKbPage() {
         const json = await res.json();
         if (json?.data) {
           setFiles((prev) =>
-            prev.map((f) => {
-              if (f.id !== json.data.id) return f;
-              if (isEditing) {
-                return {
-                  ...f,
-                  status: json.data.status,
-                  progress: json.data.progress,
-                  error_message: json.data.error_message,
-                };
-              }
-              return json.data;
-            }),
+            prev.map((f) => (f.id === json.data.id ? json.data : f)),
           );
         }
       } catch (e) {
@@ -394,17 +372,12 @@ export default function UploadKbPage() {
     if (!selectedFile) {
       setTagInput("");
       setAutoTagInput("");
-      setIsEditing(false);
       setTagDirty(false);
       setAutoTagDirty(false);
       return;
     }
-    if (!tagDirty && !isEditing) {
-      setTagInput((selectedFile.tags || []).join(", "));
-    }
-    if (!autoTagDirty && !isEditing) {
-      setAutoTagInput((selectedFile.auto_tags || []).join(", "));
-    }
+    setTagInput((selectedFile.tags || []).join(", "));
+    setAutoTagInput((selectedFile.auto_tags || []).join(", "));
   }, [selectedFile, tagDirty, autoTagDirty]);
 
   const logsForSelected = buildLogs(selectedFile);
@@ -631,8 +604,6 @@ export default function UploadKbPage() {
                     className="w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] outline-none dark:border-slate-700 dark:bg-slate-950"
                     placeholder="tag1, tag2, tag3"
                     value={tagInput}
-                    onFocus={() => setIsEditing(true)}
-                    onBlur={() => setIsEditing(false)}
                     onChange={(e) => {
                       setTagDirty(true);
                       setTagInput(e.target.value);
@@ -647,8 +618,6 @@ export default function UploadKbPage() {
                     className="w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] outline-none dark:border-slate-700 dark:bg-slate-950"
                     placeholder="auto tags (optional)"
                     value={autoTagInput}
-                    onFocus={() => setIsEditing(true)}
-                    onBlur={() => setIsEditing(false)}
                     onChange={(e) => {
                       setAutoTagDirty(true);
                       setAutoTagInput(e.target.value);
