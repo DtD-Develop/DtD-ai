@@ -87,4 +87,64 @@ class EmbedKbFileJob implements ShouldQueue
             ]);
         }
     }
+
+    private function upsertPoint(
+        string $collection,
+        int $chunkId,
+        array $embedding,
+    ) {
+        // อ่าน config (ปรับชื่อ config/env ตามโปรเจกต์ของคุณ)
+        $host =
+            config("services.qdrant.host") ?:
+            env("QDRANT_HOST", "http://qdrant:6333");
+        $port = config("services.qdrant.port") ?: env("QDRANT_PORT", null);
+
+        // Build URL
+        $base = rtrim($host, "/");
+        if ($port) {
+            // if host already contains port, avoid double
+            if (
+                strpos($base, ":") === false ||
+                preg_match("/http(s)?:\\/\\//", $base)
+            ) {
+                $url = "{$base}:{$port}/collections/{$collection}/points?wait=true";
+            } else {
+                $url = "{$base}/collections/{$collection}/points?wait=true";
+            }
+        } else {
+            $url = "{$base}/collections/{$collection}/points?wait=true";
+        }
+
+        $body = [
+            "points" => [
+                [
+                    "id" => $chunkId,
+                    "vector" => $embedding,
+                    "payload" => ["chunk_id" => $chunkId],
+                ],
+            ],
+        ];
+
+        try {
+            $res = Http::post($url, $body);
+        } catch (\Throwable $e) {
+            // network error
+            return null;
+        }
+
+        if ($res->failed()) {
+            return null;
+        }
+
+        $json = $res->json();
+        // Qdrant usually returns result -> { operation_id, status } or result -> { points: ... }
+        if (
+            !empty($json) &&
+            (isset($json["result"]) || isset($json["status"]))
+        ) {
+            return $chunkId;
+        }
+
+        return null;
+    }
 }

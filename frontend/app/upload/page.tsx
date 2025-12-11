@@ -93,20 +93,22 @@ export default function UploadKbPage() {
           },
         });
         const json = await res.json();
-        if (json?.data) {
+
+        const payload = json?.data ?? json;
+        if (payload) {
           setFiles((prev) =>
             prev.map((f) => {
-              if (f.id !== json.data.id) return f;
+              if (f.id !== payload.id) return f;
               if (isEditing) {
                 return {
                   ...f,
-                  status: json.data.status,
-                  progress: json.data.progress,
-                  summary: json.data.summary,
-                  error_message: json.data.error_message,
+                  status: payload.status,
+                  progress: payload.progress,
+                  summary: payload.summary ?? f.summary,
+                  error_message: payload.error_message,
                 };
               }
-              return json.data;
+              return payload;
             }),
           );
         }
@@ -174,13 +176,12 @@ export default function UploadKbPage() {
         },
       });
       const json = await res.json();
+      const payload = json?.data ?? json;
       if (!res.ok) {
         setMessage(json?.message || "Confirm failed");
         return;
       }
-      setFiles((prev) =>
-        prev.map((f) => (f.id === file.id ? (json.data as KbFile) : f)),
-      );
+      setFiles((prev) => prev.map((f) => (f.id === payload.id ? payload : f)));
       setMessage("Embedding started");
     } catch (e) {
       console.error("Confirm error", e);
