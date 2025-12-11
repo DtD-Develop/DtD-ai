@@ -3,7 +3,7 @@ namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
 use App\Services\QueryService;
-use App\Services\LLMService;
+use App\Services\OllamaService;
 use App\Models\Message;
 
 class ChatController extends Controller
@@ -11,7 +11,7 @@ class ChatController extends Controller
     protected $query;
     protected $llm;
 
-    public function __construct(QueryService $query, LLMService $llm)
+    public function __construct(QueryService $query, OllamaService $llm)
     {
         $this->query = $query;
         $this->llm = $llm;

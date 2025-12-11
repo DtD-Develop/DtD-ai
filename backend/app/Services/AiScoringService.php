@@ -2,7 +2,7 @@
 
 namespace App\Services;
 
-use App\Services\LLMService;
+use App\Services\OllamaService;
 
 class AiScoringService
 {
@@ -21,7 +21,7 @@ class AiScoringService
         Answer: $answer
         ";
 
-        $result = app(LLMService::class)->complete($prompt);
+        $result = app(OllamaService::class)->complete($prompt);
 
         $json = json_decode($result, true);
 
