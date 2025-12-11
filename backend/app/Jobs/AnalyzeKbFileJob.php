@@ -72,9 +72,8 @@ class AnalyzeKbFileJob implements ShouldQueue
         $kb->update([
             "auto_tags" => $keywords,
             "summary" => $summary ?: "(Summary not available)",
+            "status" => "tagged",
             "progress" => 75,
         ]);
-
-        dispatch(new \App\Jobs\EmbedKbFileJob($kb->id));
     }
 }
