@@ -4,24 +4,19 @@ namespace App\Jobs;
 
 use App\Models\KbFile;
 use App\Models\KbChunk;
+use App\Services\OllamaService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
-use App\Services\OllamaService;
 
 class AnalyzeKbFileJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public int $kbFileId;
-
-    public function __construct(int $kbFileId)
-    {
-        $this->kbFileId = $kbFileId;
-    }
+    public function __construct(public int $kbFileId) {}
 
     public function handle()
     {
@@ -30,7 +25,6 @@ class AnalyzeKbFileJob implements ShouldQueue
             return;
         }
 
-        // ------- Step 1: Load chunks -------
         $chunks = KbChunk::where("kb_file_id", $kb->id)
             ->orderBy("chunk_index")
             ->get();
@@ -38,18 +32,23 @@ class AnalyzeKbFileJob implements ShouldQueue
         if ($chunks->count() === 0) {
             return $kb->update([
                 "progress" => 70,
+                "summary" => null,
             ]);
         }
 
-        // ------- Step 2: Build text for tag extraction -------
-        $text = substr($chunks->implode("content", " "), 0, 4000);
+        // Build input text (first few chunks)
+        $summaryText = $chunks->take(8)->pluck("content")->implode("\n\n");
+        $summaryText = substr($summaryText, 0, 20000);
+
+        // Auto-tag using MLLM
+        $textForTag = substr($chunks->implode("content", " "), 0, 4000);
 
         $prompt = <<<PROMPT
-        Extract important English keywords from the following text.
+        Extract important English keywords from the text.
         Return ONLY a JSON array of strings. Example: ["logistics", "shipping"]
 
-        Text:
-        "$text"
+        TEXT:
+        "$textForTag"
         PROMPT;
 
         $res = Http::post(env("OLLAMA_URL") . "/api/generate", [
@@ -58,7 +57,6 @@ class AnalyzeKbFileJob implements ShouldQueue
         ]);
 
         $keywords = json_decode($res->json("response") ?? "[]", true);
-
         $keywords = collect($keywords)
             ->map(fn($w) => strtolower(trim($w)))
             ->filter(fn($w) => strlen($w) > 1)
@@ -67,26 +65,16 @@ class AnalyzeKbFileJob implements ShouldQueue
             ->values()
             ->toArray();
 
-        // ------- Step 3: Build summary text from first few chunks -------
-        $summaryText = $chunks->take(8)->pluck("content")->implode("\n\n");
-
-        // Limit to reasonable token size
-        if (strlen($summaryText) > 20000) {
-            $summaryText = substr($summaryText, 0, 20000);
-        }
-
-        // ------- Step 4: Generate summary -------
+        // Build summary with OllamaService
         $ollama = new OllamaService();
         $summary = $ollama->summarizeText($summaryText, 300);
 
-        // ------- Step 5: Save both auto-tags + summary -------
         $kb->update([
             "auto_tags" => $keywords,
-            "summary" => $summary,
+            "summary" => $summary ?: "(Summary not available)",
             "progress" => 75,
         ]);
 
-        // ------- Step 6: Continue to Embed Job -------
         dispatch(new \App\Jobs\EmbedKbFileJob($kb->id));
     }
 }

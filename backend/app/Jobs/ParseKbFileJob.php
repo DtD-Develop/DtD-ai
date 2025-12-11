@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Models\KbFile;
+use App\Models\KbChunk;
 use Illuminate\Bus\Queueable;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Queue\SerializesModels;
@@ -18,78 +19,6 @@ class ParseKbFileJob implements ShouldQueue
 
     public function __construct(public int $kbFileId) {}
 
-    // public function handle()
-    // {
-    //     $kb = KbFile::find($this->kbFileId);
-    //     if (!$kb) {
-    //         return;
-    //     }
-
-    //     $kb->update([
-    //         "status" => "parsing",
-    //         "progress" => 30,
-    //     ]);
-
-    //     $resp = Http::timeout(300)->post(config("services.ingest.url") . "/parse", [
-    //         "file_path" => storage_path("app/" . $kb->storage_path),
-    //     ]);
-
-    //     if ($resp->failed()) {
-    //         return $kb->update([
-    //             "status" => "failed",
-    //             "error_message" => $resp->body(),
-    //         ]);
-    //     }
-
-    //     $kb->update([
-    //         "progress" => 50,
-    //     ]);
-
-    //     $parseResult = $resp->json();
-    //     $autoTags = $parseResult["tags"] ?? [];
-
-    //     // หลังจากอ่านไฟล์ + chunk + auto_tag เสร็จ
-    //     $chunks = $parseResult["chunks"] ?? [];
-    //     $texts = collect($chunks)
-    //         ->pluck("text")
-    //         ->map(fn($t) => trim($t))
-    //         ->all();
-    //     $fullText = implode("\n\n---\n\n", $texts);
-
-    //     // สร้าง summary prompt แบบ TL;DR + Bullet list
-    //     $prompt = <<<PROMPT
-    //     สรุปเนื้อหาในไฟล์นี้ให้อยู่ในรูปแบบ:
-
-    //     TL;DR:
-    //     - สรุปเนื้อหาหลักไม่เกิน 3-4 ประโยค
-
-    //     Key Points:
-    //     - ใส่ bullet point 4-8 ข้อที่อธิบายสิ่งสำคัญในไฟล์
-    //     - กระชับ ชัดเจน ไม่ลากยาว
-
-    //     [CONTENT START]
-    //     {$fullText}
-    //     [CONTENT END]
-    //     PROMPT;
-
-    //     $summaryRes = Http::post(env("OLLAMA_URL") . "/api/generate", [
-    //         "model" => env("OLLAMA_MODEL", "llama3.1:8b"),
-    //         "prompt" => $prompt,
-    //         "stream" => false,
-    //     ]);
-
-    //     $summary = $summaryRes->json()["response"] ?? null;
-
-    //     $kb->update([
-    //         "summary" => $summary,
-    //         "progress" => 60,
-    //         "status" => "tagged",
-    //     ]);
-
-    //     $this->release(1);
-    //     dispatch(new AnalyzeKbFileJob($this->kbFileId));
-    // }
-    //
     public function handle()
     {
         $kb = KbFile::find($this->kbFileId);
@@ -102,6 +31,7 @@ class ParseKbFileJob implements ShouldQueue
             "progress" => 30,
         ]);
 
+        // Call ingest service
         $resp = Http::timeout(300)->post(
             config("services.ingest.url") . "/parse",
             [
@@ -116,14 +46,28 @@ class ParseKbFileJob implements ShouldQueue
             ]);
         }
 
-        $parseResult = $resp->json();
-        $ingestTags = $parseResult["tags"] ?? null;
+        $data = $resp->json();
+        $tags = $data["tags"] ?? [];
+        $chunks = $data["chunks"] ?? [];
 
-        // create summary (optional)
+        // Remove old chunks
+        KbChunk::where("kb_file_id", $kb->id)->delete();
+
+        // Save chunks
+        foreach ($chunks as $chunk) {
+            KbChunk::create([
+                "kb_file_id" => $kb->id,
+                "chunk_index" => $chunk["i"],
+                "content" => $chunk["text"],
+            ]);
+        }
+
+        // Update KB
         $kb->update([
-            "auto_tags" => $ingestTags ?: [],
+            "auto_tags" => $tags,
+            "chunks_count" => count($chunks),
             "status" => "tagged",
-            "progress" => $ingestTags ? 65 : 50, // 🚀 If has tags → skip ahead
+            "progress" => count($chunks) > 0 ? 65 : 50,
         ]);
 
         dispatch(new AnalyzeKbFileJob($kb->id));

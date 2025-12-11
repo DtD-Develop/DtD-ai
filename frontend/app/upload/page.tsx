@@ -525,6 +525,7 @@ export default function UploadKbPage() {
                         <button
                           type="button"
                           onClick={(e) => {
+                            e.preventDefault();
                             e.stopPropagation();
                             handleConfirm(file);
                           }}
