@@ -160,6 +160,13 @@ services:
     command: php artisan queue:work --sleep=3 --tries=3
     volumes:
       - ./backend:/var/www/html
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_DATABASE: dtdai
+      DB_USERNAME: root
+      DB_PASSWORD: root
+      REDIS_HOST: redis
     depends_on:
       - backend
       - redis
