@@ -5,7 +5,6 @@ use App\Http\Controllers\KbController;
 use App\Http\Controllers\QueryController;
 use App\Http\Controllers\ApiLogController;
 use App\Http\Controllers\ChatController;
-use App\Http\Controllers\Api\ChatController as ChatApiController;
 use App\Http\Controllers\DashboardController;
 
 // Route::post("/upload", [UploadController::class, "upload"]);
