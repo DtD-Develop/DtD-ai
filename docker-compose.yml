@@ -3,8 +3,8 @@ services:
     container_name: mysql
     image: mysql:8
     environment:
-      MYSQL_ROOT_PASSWORD: root
-      MYSQL_DATABASE: dtdai
+      MYSQL_ROOT_PASSWORD: DtDAiAdmin
+      MYSQL_DATABASE: ai_platform
     volumes:
       - mysql_data:/var/lib/mysql
     networks:
@@ -28,8 +28,8 @@ services:
       DB_HOST: mysql
       DB_PORT: 3306
       DB_DATABASE: ai_platform
-      DB_USERNAME: aiuser
-      DB_PASSWORD: aipassword
+      DB_USERNAME: DtDAiAdmin
+      DB_PASSWORD: DtD_Develop2026!!
       REDIS_HOST: redis
       OLLAMA_HOST: http://ollama:11434
       QDRANT_URL: http://qdrant:6333
@@ -56,6 +56,13 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.horizon
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_DATABASE: ai_platform
+      DB_USERNAME: DtDAiAdmin
+      DB_PASSWORD: DtD_Develop2026!!
+      REDIS_HOST: redis
     depends_on:
       - backend
     networks:
