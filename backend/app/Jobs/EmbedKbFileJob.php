@@ -3,6 +3,8 @@
 namespace App\Jobs;
 
 use App\Models\KbFile;
+use App\Models\KbChunk;
+use App\Services\OllamaService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Queue\SerializesModels;
@@ -17,18 +19,16 @@ class EmbedKbFileJob implements ShouldQueue
 
     public function handle()
     {
-        $kb = KbFile::find($this->fileId);
+        // FIX 1: fileId → kbFileId
+        $kb = KbFile::find($this->kbFileId);
         if (!$kb) {
             return;
         }
 
         $ollama = new OllamaService();
 
-        $chunks = KbChunk::where("kb_file_id", $this->fileId)
-            ->when(
-                $this->chunkIndex !== null,
-                fn($q) => $q->where("chunk_index", $this->chunkIndex),
-            )
+        // FIX 2: remove chunkIndex + fix file id usage
+        $chunks = KbChunk::where("kb_file_id", $this->kbFileId)
             ->orderBy("chunk_index")
             ->get();
 
@@ -36,20 +36,18 @@ class EmbedKbFileJob implements ShouldQueue
         foreach ($chunks as $c) {
             $embedding = $ollama->getEmbedding($c->content);
             if (!$embedding) {
-                // try retry once
                 sleep(1);
                 $embedding = $ollama->getEmbedding($c->content);
             }
 
             if (!$embedding) {
                 $failures[] = $c->id;
-                // mark chunk error for debugging
                 $c->update(["error" => "embed_failed"]);
-                // log details into kb error_detail (append)
+
                 $cur = $kb->error_detail ?? "";
                 $cur .= "chunk {$c->id} embed failed; ";
                 $kb->update(["error_detail" => $cur, "progress" => 90]);
-                // continue to next chunk (do not abort whole process)
+
                 continue;
             }
 
@@ -58,19 +56,22 @@ class EmbedKbFileJob implements ShouldQueue
                 $c->id,
                 $embedding,
             );
-            if ($pointId === null) {
+
+            if (!$pointId) {
                 $failures[] = $c->id;
+
                 $c->update(["error" => "qdrant_upsert_failed"]);
+
                 $cur = $kb->error_detail ?? "";
                 $cur .= "chunk {$c->id} qdrant_upsert_failed; ";
                 $kb->update(["error_detail" => $cur, "progress" => 92]);
+
                 continue;
             }
 
             $c->update(["point_id" => $pointId, "error" => null]);
         }
 
-        // set final status
         if (count($failures) === 0) {
             $kb->update([
                 "progress" => 100,
@@ -79,7 +80,6 @@ class EmbedKbFileJob implements ShouldQueue
                 "error_detail" => null,
             ]);
         } else {
-            // partial success
             $kb->update([
                 "progress" => 98,
                 "status" => "partial",
@@ -93,24 +93,15 @@ class EmbedKbFileJob implements ShouldQueue
         int $chunkId,
         array $embedding,
     ) {
-        // อ่าน config (ปรับชื่อ config/env ตามโปรเจกต์ของคุณ)
         $host =
             config("services.qdrant.host") ?:
             env("QDRANT_HOST", "http://qdrant:6333");
-        $port = config("services.qdrant.port") ?: env("QDRANT_PORT", null);
+        $port = config("services.qdrant.port") ?: env("QDRANT_PORT");
 
-        // Build URL
         $base = rtrim($host, "/");
+
         if ($port) {
-            // if host already contains port, avoid double
-            if (
-                strpos($base, ":") === false ||
-                preg_match("/http(s)?:\\/\\//", $base)
-            ) {
-                $url = "{$base}:{$port}/collections/{$collection}/points?wait=true";
-            } else {
-                $url = "{$base}/collections/{$collection}/points?wait=true";
-            }
+            $url = "{$base}:{$port}/collections/{$collection}/points?wait=true";
         } else {
             $url = "{$base}/collections/{$collection}/points?wait=true";
         }
@@ -128,7 +119,6 @@ class EmbedKbFileJob implements ShouldQueue
         try {
             $res = Http::post($url, $body);
         } catch (\Throwable $e) {
-            // network error
             return null;
         }
 
@@ -137,11 +127,8 @@ class EmbedKbFileJob implements ShouldQueue
         }
 
         $json = $res->json();
-        // Qdrant usually returns result -> { operation_id, status } or result -> { points: ... }
-        if (
-            !empty($json) &&
-            (isset($json["result"]) || isset($json["status"]))
-        ) {
+
+        if (isset($json["result"]) || isset($json["status"])) {
             return $chunkId;
         }
 
