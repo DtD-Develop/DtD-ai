@@ -1,141 +1,78 @@
 <?php
-
 namespace App\Http\Controllers;
 
 use Illuminate\Http\Request;
-use App\Models\Conversation;
+use App\Services\QueryService;
+use App\Services\LLMService;
 use App\Models\Message;
 
 class ChatController extends Controller
 {
-    /**
-     * POST /api/chat/test
-     * body: { "message": "..." }
-     * ตอนนี้ให้ reuse QueryController ไปก่อน
-     */
-    public function test(Request $request, QueryController $queryController)
+    protected $query;
+    protected $llm;
+
+    public function __construct(QueryService $query, LLMService $llm)
     {
-        // คุณอาจเพิ่ม field พิเศษ เช่น debug = true เป็นต้น
-        return $queryController->query($request);
+        $this->query = $query;
+        $this->llm = $llm;
     }
 
     /**
-     * POST /api/chat/teach
-     * body: { "question": "...", "ideal_answer": "...", "notes": "optional" }
-     * ตอนนี้ยังไม่มี table สำหรับเก็บ, เอาเป็น log ไว้ก่อน
+     * POST /api/chat/message
+     * body: { conversation_id, message, mode: 'test'|'train' }
      */
-    public function teach(Request $request)
+    public function message(Request $req)
     {
-        $data = $request->validate([
-            "question" => "required|string",
-            "ideal_answer" => "required|string",
-            "notes" => "nullable|string",
+        $req->validate([
+            "conversation_id" => "required|integer",
+            "message" => "required|string",
+            "mode" => "nullable|in:test,train",
         ]);
 
-        // เก็บลง log ไปก่อน (อนาคตค่อยสร้าง training_examples table)
-        \Log::info("Manual teach example", $data);
+        $question = $req->message;
+        // 1) Retrieve top-k contexts from KB
+        $topK = 4;
+        $contexts = $this->query->search($question, $topK); // returns array of ['id','text','score','payload']
 
-        return response()->json([
-            "message" => "Teaching example received",
-        ]);
-    }
+        // 2) Build RAG prompt
+        $prompt = $this->buildRagPrompt($question, $contexts);
 
-    // GET /api/chat/conversations
-    public function list(Request $request)
-    {
-        $userId = $request->attributes->get("api_key"); // ตามที่เลือกไว้
-        $convs = Conversation::where("user_id", $userId)
-            ->orderByDesc("updated_at")
-            ->limit(50)
-            ->get();
+        // 3) Call LLM with prompt
+        $answer = $this->llm->chatCompletion($prompt);
 
-        return response()->json([
-            "data" => $convs,
-        ]);
-    }
-
-    // POST /api/chat/conversations
-    public function create(Request $request)
-    {
-        $userId = $request->attributes->get("api_key");
-
-        $conv = Conversation::create([
-            "title" => $request->input("title", "New chat"),
-            "user_id" => $userId,
+        // 4) Save message + rag context
+        $msg = Message::create([
+            "conversation_id" => $req->conversation_id,
+            "question" => $question,
+            "answer" => $answer,
+            "mode" => $req->mode ?? "test",
+            "rag_context" => json_encode($contexts),
         ]);
 
         return response()->json([
-            "data" => $conv,
+            "answer" => $answer,
+            "contexts" => $contexts,
+            "message_id" => $msg->id,
         ]);
     }
 
-    // GET /api/chat/conversations/{id}
-    public function show(Request $request, $id)
+    protected function buildRagPrompt(string $question, array $contexts): string
     {
-        $userId = $request->attributes->get("api_key");
-
-        $conv = Conversation::where("id", $id)
-            ->where("user_id", $userId)
-            ->firstOrFail();
-
-        $messages = $conv->messages()->orderBy("created_at")->get();
-
-        return response()->json([
-            "conversation" => $conv,
-            "messages" => $messages,
-        ]);
-    }
-
-    // DELETE /api/chat/conversations/{id}
-    public function destroy(Request $request, $id)
-    {
-        $userId = $request->attributes->get("api_key");
-
-        $conv = Conversation::where("id", $id)
-            ->where("user_id", $userId)
-            ->firstOrFail();
-
-        $conv->delete();
-
-        return response()->json([
-            "message" => "Conversation deleted",
-        ]);
-    }
-
-    // POST /api/chat/store
-    // body: { conversation_id, user_message, assistant_message }
-    public function storeMessages(Request $request)
-    {
-        $userId = $request->attributes->get("api_key");
-
-        $conversationId = (int) $request->input("conversation_id");
-        $conv = Conversation::where("id", $conversationId)
-            ->where("user_id", $userId)
-            ->firstOrFail();
-
-        $userMessage = $request->input("user_message");
-        $assistantMessage = $request->input("assistant_message");
-
-        if ($userMessage) {
-            Message::create([
-                "conversation_id" => $conv->id,
-                "role" => "user",
-                "content" => $userMessage,
-            ]);
+        $header =
+            "You are an assistant that answers questions using the provided knowledge snippets. If the answer isn't contained in the snippets, say you don't know.\n\n";
+        if (count($contexts) === 0) {
+            $header .= "No relevant knowledge snippets found.\n\n";
+        } else {
+            $header .= "Relevant knowledge snippets:\n";
+            foreach ($contexts as $i => $c) {
+                $text = trim($c["text"] ?? ($c["payload"]["text"] ?? ""));
+                $header .= "[" . ($i + 1) . "] " . $text . "\n\n";
+            }
         }
 
-        if ($assistantMessage) {
-            Message::create([
-                "conversation_id" => $conv->id,
-                "role" => "assistant",
-                "content" => $assistantMessage,
-            ]);
-        }
-
-        $conv->touch(); // update updated_at
-
-        return response()->json([
-            "message" => "Messages saved",
-        ]);
+        $header .= "User question:\n\"{$question}\"\n\n";
+        $header .=
+            "Answer concisely and cite snippet numbers where relevant.\n";
+        return $header;
     }
 }
