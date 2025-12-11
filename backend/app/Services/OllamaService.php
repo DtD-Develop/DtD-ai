@@ -1,129 +1,192 @@
 <?php
+
 namespace App\Services;
 
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
+use Psr\Log\LoggerInterface;
 
 class OllamaService
 {
     protected string $baseUrl;
     protected string $model;
+    protected ?LoggerInterface $logger;
 
-    public function __construct()
+    public function __construct(LoggerInterface $logger = null)
     {
         $this->baseUrl = rtrim(env("OLLAMA_URL", "http://ollama:11434"), "/");
         $this->model = env("OLLAMA_MODEL", "llama3.1:8b");
+        $this->logger = $logger;
     }
 
     /**
      * Get embedding vector for a text.
      * Returns array of floats or null on failure.
      *
-     * NOTES:
-     * - If you run Ollama locally, adjust OLLAMA_URL and OLLAMA_MODEL in .env
-     * - Alternatively, set OPENAI_API_KEY in env to use OpenAI embeddings fallback.
+     * Prioritizes OPENAI_API_KEY if present (fallback), otherwise tries Ollama embed endpoint.
      */
     public function getEmbedding(string $text): ?array
     {
-        // prefer OpenAI if configured
         $openaiKey = env("OPENAI_API_KEY");
-        if (!empty($openaiKey)) {
-            $res = Http::withHeaders([
-                "Authorization" => "Bearer {$openaiKey}",
-                "Content-Type" => "application/json",
-            ])->post("https://api.openai.com/v1/embeddings", [
-                "model" => env("OPENAI_EMBED_MODEL", "text-embedding-3-small"),
-                "input" => $text,
-            ]);
 
-            if ($res->ok()) {
-                $json = $res->json();
-                if (isset($json["data"][0]["embedding"])) {
-                    return $json["data"][0]["embedding"];
+        if (!empty($openaiKey)) {
+            try {
+                $res = Http::withHeaders([
+                    "Authorization" => "Bearer " . $openaiKey,
+                    "Content-Type" => "application/json",
+                ])->post("https://api.openai.com/v1/embeddings", [
+                    "model" => env(
+                        "OPENAI_EMBED_MODEL",
+                        "text-embedding-3-small",
+                    ),
+                    "input" => $text,
+                ]);
+
+                if ($res->ok()) {
+                    $json = $res->json();
+                    if (isset($json["data"][0]["embedding"])) {
+                        return $json["data"][0]["embedding"];
+                    }
+                } else {
+                    $this->logger?->warning("OpenAI embed failed", [
+                        "status" => $res->status(),
+                        "body" => $res->body(),
+                    ]);
                 }
+            } catch (\Throwable $e) {
+                $this->logger?->error("OpenAI embed error", [
+                    "err" => $e->getMessage(),
+                ]);
             }
             return null;
         }
 
-        // Ollama embedding: many setups expose an embedding endpoint at /embed or similar.
-        // Adjust path according to your Ollama setup. Here we try a common pattern:
-        try {
-            $url = $this->baseUrl . "/embed";
-            $payload = [
-                "model" => $this->model,
-                "input" => $text,
-            ];
-            $res = Http::post($url, $payload);
-            if ($res->ok()) {
-                $json = $res->json();
-                // try common keys
-                if (isset($json["embedding"])) {
-                    return $json["embedding"];
+        // Ollama embedding endpoint (some setups expose /embed or /api/embed)
+        // Try common endpoints until success.
+        $endpoints = [
+            $this->baseUrl . "/embed",
+            $this->baseUrl . "/api/embed",
+            $this->baseUrl . "/api/embeddings",
+        ];
+
+        foreach ($endpoints as $url) {
+            try {
+                $res = Http::post($url, [
+                    "model" => $this->model,
+                    "input" => $text,
+                ]);
+
+                if ($res->ok()) {
+                    $json = $res->json();
+                    if (
+                        isset($json["embedding"]) &&
+                        is_array($json["embedding"])
+                    ) {
+                        return $json["embedding"];
+                    }
+                    if (isset($json["data"][0]["embedding"])) {
+                        return $json["data"][0]["embedding"];
+                    }
                 }
-                if (isset($json["data"][0]["embedding"])) {
-                    return $json["data"][0]["embedding"];
-                }
+            } catch (\Throwable $e) {
+                $this->logger?->debug("Ollama embed attempt failed", [
+                    "url" => $url,
+                    "err" => $e->getMessage(),
+                ]);
             }
-        } catch (\Throwable $e) {
-            // swallow - return null
         }
 
+        $this->logger?->warning(
+            "No embedding available (Ollama/OpenAI not responding or endpoint mismatch).",
+        );
         return null;
     }
 
     /**
-     * Summarize a text block. Return short summary string.
-     * Uses Ollama (completion) or OpenAI chat/completion as fallback.
+     * Generate text from a prompt using Ollama generate API.
+     * Return raw response string or fallback message.
      */
-    public function summarizeText(string $text, int $maxTokens = 256): string
+    public function generate(string $prompt, array $options = []): string
     {
-        $openaiKey = env("OPENAI_API_KEY");
-        if (!empty($openaiKey)) {
-            // use OpenAI chat completions
-            $prompt =
-                "Summarize the following text into a short paragraph (Thai/English as in the content):\n\n" .
-                $text;
-            $res = Http::withHeaders([
-                "Authorization" => "Bearer {$openaiKey}",
-                "Content-Type" => "application/json",
-            ])->post("https://api.openai.com/v1/chat/completions", [
-                "model" => env("OPENAI_SUMMARY_MODEL", "gpt-4o-mini"),
-                "messages" => [["role" => "user", "content" => $prompt]],
-                "max_tokens" => $maxTokens,
-                "temperature" => 0.2,
-            ]);
-            if ($res->ok()) {
-                $json = $res->json();
-                return $json["choices"][0]["message"]["content"] ?? "";
-            }
-            return "";
-        }
+        // options: ['stream' => false, 'max_tokens' => int, ...] - passed to API if needed
+        $url = rtrim($this->baseUrl, "/") . "/api/generate";
 
-        // Ollama fallback: call generate endpoint
-        try {
-            $prompt =
-                "Summarize the following text into 2-4 concise sentences:\n\n" .
-                $text;
-            $url = $this->baseUrl . "/api/generate"; // adjust if your Ollama uses different path
-            $res = Http::post($url, [
+        $payload = array_merge(
+            [
                 "model" => $this->model,
                 "prompt" => $prompt,
                 "stream" => false,
-            ]);
-            if ($res->ok()) {
-                $json = $res->json();
-                // different Ollama setups return different keys
-                if (isset($json["response"])) {
-                    return $json["response"];
-                }
-                if (isset($json["text"])) {
-                    return $json["text"];
-                }
+            ],
+            $options,
+        );
+
+        try {
+            $res = Http::timeout(30)->post($url, $payload);
+
+            if ($res->failed()) {
+                $this->logger?->error("Ollama generate failed", [
+                    "status" => $res->status(),
+                    "body" => $res->body(),
+                ]);
+                return "I'm sorry, I cannot answer right now.";
             }
+
+            $json = $res->json();
+
+            // support different response formats
+            if (isset($json["response"])) {
+                return is_string($json["response"])
+                    ? $json["response"]
+                    : json_encode($json["response"]);
+            }
+            if (isset($json["text"])) {
+                return $json["text"];
+            }
+            // Some Ollama returns choices/message content
+            if (isset($json["choices"][0]["message"]["content"])) {
+                return $json["choices"][0]["message"]["content"];
+            }
+
+            // fallback: return body text
+            $body = $res->body();
+            return $body ?: "No response from LLM.";
         } catch (\Throwable $e) {
-            // ignore
+            $this->logger?->error("Ollama generate exception", [
+                "err" => $e->getMessage(),
+            ]);
+            return "Error communicating with language model.";
+        }
+    }
+
+    /**
+     * Convenience: chat-like wrapper that accepts messages array (role/content) and generates.
+     * It will join messages into a single prompt.
+     */
+    public function chatFromMessages(
+        array $messages,
+        array $options = [],
+    ): string {
+        $assembled = "";
+        foreach ($messages as $m) {
+            $role = $m["role"] ?? "user";
+            $content = $m["content"] ?? "";
+            $assembled .= strtoupper($role) . ": " . $content . "\n\n";
         }
 
-        return "";
+        $prompt =
+            "You are a helpful assistant. Use the following conversation and answer the last user message.\n\n" .
+            $assembled;
+        return $this->generate($prompt, $options);
+    }
+
+    /**
+     * Summarize helper (optional) - uses generate
+     */
+    public function summarize(string $text, int $maxSentences = 3): string
+    {
+        $prompt =
+            "Summarize the following text into {$maxSentences} sentences. Keep it concise and factual:\n\n" .
+            $text;
+        return $this->generate($prompt, ["stream" => false]);
     }
 }

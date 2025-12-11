@@ -3,33 +3,32 @@
 namespace App\Services;
 
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Str;
+use Illuminate\Support\Arr;
+use Psr\Log\LoggerInterface;
 
 class QueryService
 {
-    public function __construct(
-        protected ?string $ingestEndpoint = null,
-        protected ?string $qdrantUrl = null,
-        protected ?string $ollamaUrl = null,
-        protected ?string $ollamaModel = null,
-    ) {
-        $this->ingestEndpoint =
-            $this->ingestEndpoint ?:
-            config("services.ingest.endpoint", config("services.ingest.url"));
-        $this->qdrantUrl =
-            $this->qdrantUrl ?: env("QDRANT_URL", "http://qdrant:6333");
-        $this->ollamaUrl =
-            $this->ollamaUrl ?: env("OLLAMA_URL", "http://ollama:11434");
-        $this->ollamaModel =
-            $this->ollamaModel ?: env("OLLAMA_MODEL", "llama3.1:8b");
+    protected string $qdrantUrl;
+    protected string $qdrantCollection;
+    protected string $ollamaUrl;
+    protected string $ollamaModel;
+    protected ?LoggerInterface $logger;
+
+    public function __construct(LoggerInterface $logger = null)
+    {
+        $this->qdrantUrl = env("QDRANT_URL", "http://qdrant:6333");
+        $this->qdrantCollection = env("QDRANT_COLLECTION", "kb"); // adjust to your collection name
+        $this->ollamaUrl = env("OLLAMA_URL", "http://ollama:11434");
+        $this->ollamaModel = env("OLLAMA_MODEL", "llama3.1:8b");
+        $this->logger = $logger;
     }
 
     /**
-     * @param array{
-     *   conversation_id?: int,
-     *   query?: string,
-     *   messages?: array<array{role:string,content:string}>
-     * } $payload
+     * Main entry: accepts payload with either 'messages' (chat) or 'query' string.
+     * Returns ['text' => answer, 'kb_hits' => [...], 'rag_prompt' => '...']
+     *
+     * Example $payload:
+     *  [ 'conversation_id' => 1, 'query' => 'Who is CEO of ShipD2D?' ]
      */
     public function answer(array $payload): array
     {
@@ -37,135 +36,132 @@ class QueryService
         $messages = $payload["messages"] ?? null;
         $query = $payload["query"] ?? null;
 
-        // ถ้า frontend / code เก่า ส่งมาแค่ query → สร้าง messages ให้เอง
         if ($messages === null) {
             if ($query === null) {
                 throw new \InvalidArgumentException(
                     'Either "messages" or "query" is required.',
                 );
             }
-
-            $messages = [
-                [
-                    "role" => "user",
-                    "content" => $query,
-                ],
-            ];
+            $messages = [["role" => "user", "content" => $query]];
         }
 
-        // ---- จากตรงนี้ไป ใช้ $messages เป็นหลัก ----
-        // ตรงนี้เอาไปต่อกับ logic เดิมของคุณ เช่น RAG + LLM
-        // ตัวอย่าง pseudo-code:
+        // Using last user turn for KB search
+        $lastUser = null;
+        foreach (array_reverse($messages) as $m) {
+            if (($m["role"] ?? "") === "user") {
+                $lastUser = $m["content"] ?? null;
+                break;
+            }
+        }
+        if ($lastUser === null) {
+            // fallback to first message content
+            $lastUser = $messages[0]["content"] ?? "";
+        }
 
-        /*
-             $ragResult = $this->kbService->searchRelevantDocs($messages, $conversationId);
+        // 1) Search KB
+        $kbHits = $this->searchKB($lastUser, 4);
 
-             $llmResponse = $this->llmClient->chat([
-                 'model' => '...',
-                 'messages' => array_merge(
-                     [
-                         [
-                             'role' => 'system',
-                             'content' => 'You are ...',
-                         ],
-                     ],
-                     $messages
-                 ),
-                 'kb_context' => $ragResult,
-             ]);
-             */
+        // Extract text snippets for prompt
+        $contextTexts = [];
+        foreach ($kbHits as $hit) {
+            // payload may differ, try common fields
+            $payload = $hit["payload"] ?? [];
+            $text =
+                $payload["text"] ??
+                ($payload["content"] ?? ($hit["payload"] ?? ""));
+            $contextTexts[] = trim($text);
+        }
 
-        // สมมติสุดท้ายได้ text กับ kb_hits กลับมา:
-        $text = $this->callYourLlmAndGetText($messages, $conversationId);
-        $kbHits = []; // หรือจาก RAG จริงของคุณ
+        // 2) Build RAG prompt (English)
+        $ragPrompt = $this->buildKbPrompt($lastUser, $contextTexts);
+
+        // 3) Call LLM via OllamaService
+        $ollama = app(OllamaService::class);
+        $answerText = $ollama->generate($ragPrompt);
 
         return [
-            "text" => $text,
+            "text" => $answerText,
             "kb_hits" => $kbHits,
+            "rag_prompt" => $ragPrompt,
         ];
     }
 
     /**
-     * ตรงนี้แทนที่ด้วยการเรียก LLM จริงของคุณ (OpenAI / Ollama / อะไรก็ได้)
+     * Search Qdrant collection for top-k relevant points.
+     * Return array of raw hits (id, score, payload).
      */
-    protected function callYourLlmAndGetText(
-        array $messages,
-        ?int $conversationId,
-    ): string {
-        $response = Http::post("http://ollama:11434/api/chat", [
-            "model" => "llama3.1:8b",
-            "messages" => $messages,
-            "stream" => false,
-        ]);
+    public function searchKB(string $queryText, int $topK = 4): array
+    {
+        // 1) create embedding for query (use OllamaService or OpenAI fallback there)
+        $embed = app(OllamaService::class)->getEmbedding($queryText);
 
-        if ($response->failed()) {
-            \Log::error("Ollama API Failed", [
-                "body" => $response->body(),
+        if (!$embed || !is_array($embed) || count($embed) === 0) {
+            $this->logger?->warning("Embedding missing when searching KB", [
+                "query" => $queryText,
             ]);
-            return "ขออภัย ฉันไม่สามารถตอบได้ตอนนี้";
+            return [];
         }
 
-        $json = $response->json();
+        // 2) Call Qdrant search
+        $url =
+            rtrim($this->qdrantUrl, "/") .
+            "/collections/{$this->qdrantCollection}/points/search";
 
-        $content = $json["message"]["content"] ?? null;
+        try {
+            $res = Http::timeout(15)->post($url, [
+                "vector" => $embed,
+                "limit" => $topK,
+                "with_payload" => true,
+                "with_vector" => false,
+            ]);
 
-        if (!$content) {
-            \Log::error("Empty response from Ollama", [
-                "json" => $json,
+            if ($res->failed()) {
+                $this->logger?->error("Qdrant search failed", [
+                    "status" => $res->status(),
+                    "body" => $res->body(),
+                ]);
+                return [];
+            }
+
+            $json = $res->json();
+            return Arr::get($json, "result", []);
+        } catch (\Throwable $e) {
+            $this->logger?->error("Qdrant search exception", [
+                "err" => $e->getMessage(),
             ]);
-            \Log::info("Ollama raw response", [
-                "body" => $response->body(),
-            ]);
-            return "ขออภัย ฉันไม่เข้าใจคำถาม";
+            return [];
         }
-
-        return $content;
     }
 
+    /**
+     * Build an English RAG prompt using the context texts.
+     */
     protected function buildKbPrompt(string $query, array $contextTexts): string
     {
-        $ctx = implode("\n\n---\n\n", $contextTexts);
+        $ctx = count($contextTexts)
+            ? implode("\n\n---\n\n", $contextTexts)
+            : "";
 
-        return <<<PROMPT
-        คุณคือ AI assistant ที่ตอบคำถามจาก Knowledge Base ที่ให้ไว้ด้านล่างเท่านั้น
+        $prompt = <<<PROMPT
+        You are an AI assistant that answers ONLY using the information provided in the Knowledge Base below.
 
-        [CONTEXT START]
+        [KNOWLEDGE BASE CONTEXT]
         {$ctx}
-        [CONTEXT END]
+        [END OF CONTEXT]
 
-        กฎ:
-        - ถ้าคำตอบไม่มีใน context ให้ตอบว่า "จากข้อมูลที่มีอยู่ ฉันไม่พบคำตอบในเอกสาร"
-        - ห้ามแต่งเรื่องเอง ห้ามตอบข้อมูลที่ไม่มีใน context
-        - อธิบายให้กระชับ ชัดเจน และมีโครงสร้าง อ่านง่าย
+        Rules:
+        - If the answer is not found in the context, reply exactly: "I don't have this information in the knowledge base."
+        - Do NOT invent any information that is not explicitly included in the context.
+        - Keep answers concise, factual, and well-structured.
+        - If relevant, cite which part(s) of the context your answer is based on by referencing the snippet index (1,2,...).
+        - If context is empty, briefly say you could not find relevant information in the KB.
 
-        คำถามของผู้ใช้:
-        {$query}
+        User Question:
+        "{$query}"
+
+        Provide the final answer below:
         PROMPT;
-    }
 
-    protected function callLlmPlain(string $query): string
-    {
-        $prompt =
-            "ตอบคำถามต่อไปนี้ให้ชัดเจน กระชับ และมีโครงสร้าง:\n\n" . $query;
-
-        return $this->callLlmWithPrompt($prompt);
-    }
-
-    protected function callLlmWithPrompt(string $prompt): string
-    {
-        $res = Http::post(rtrim($this->ollamaUrl, "/") . "/api/generate", [
-            "model" => $this->ollamaModel,
-            "prompt" => $prompt,
-            "stream" => false,
-        ]);
-
-        if (!$res->ok()) {
-            return "ขออภัย ระบบไม่สามารถตอบได้ในขณะนี้";
-        }
-
-        // แล้วแต่รูปแบบ response ของ ollama ที่คุณใช้
-        $body = $res->json();
-        return $body["response"] ??
-            ($body["text"] ?? "ขออภัย ระบบไม่สามารถตอบได้ในขณะนี้");
+        return $prompt;
     }
 }
