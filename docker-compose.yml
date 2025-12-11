@@ -170,6 +170,8 @@ services:
     depends_on:
       - backend
       - redis
+    networks:
+      - app-network
 
 networks:
   app-network:
