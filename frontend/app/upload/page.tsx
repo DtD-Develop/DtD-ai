@@ -20,6 +20,7 @@ type KbFile = {
   error_message: string | null;
   created_at: string;
   updated_at: string;
+  summary?: string | null;
 };
 
 type PaginatedResponse = {
@@ -101,6 +102,7 @@ export default function UploadKbPage() {
                   ...f,
                   status: json.data.status,
                   progress: json.data.progress,
+                  summary: json.data.summary,
                   error_message: json.data.error_message,
                 };
               }
@@ -609,6 +611,21 @@ export default function UploadKbPage() {
                   >
                     Save tags
                   </button>
+                </div>
+                <div className="mt-4">
+                  <label className="block text-[11px] font-semibold mb-1">
+                    Summary
+                  </label>
+
+                  {selectedFile?.summary ? (
+                    <div className="p-3 bg-slate-100 dark:bg-slate-800 rounded-md whitespace-pre-line text-[11px] text-slate-800 dark:text-slate-200">
+                      {selectedFile.summary}
+                    </div>
+                  ) : (
+                    <div className="text-slate-400 dark:text-slate-500 text-[11px] italic">
+                      (No summary yet – processing…)
+                    </div>
+                  )}
                 </div>
 
                 {/* Logs */}

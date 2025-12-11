@@ -17,49 +17,74 @@ class EmbedKbFileJob implements ShouldQueue
 
     public function handle()
     {
-        $kb = KbFile::find($this->kbFileId);
+        $kb = KbFile::find($this->fileId);
         if (!$kb) {
             return;
         }
 
-        // กันไว้ เผื่อมี job เก่าเรียกซ้ำ
-        $kb->update([
-            "status" => "embedding",
-            "progress" => 80,
-        ]);
+        $ollama = new OllamaService();
 
-        $ingestUrl = config("services.ingest.url"); // ✅ ใช้ config เดียวกับ Parse
+        $chunks = KbChunk::where("kb_file_id", $this->fileId)
+            ->when(
+                $this->chunkIndex !== null,
+                fn($q) => $q->where("chunk_index", $this->chunkIndex),
+            )
+            ->orderBy("chunk_index")
+            ->get();
 
-        try {
-            $resp = Http::timeout(300)->post($ingestUrl . "/embed", [
-                "file_path" => storage_path("app/" . $kb->storage_path),
-                "tags" => $kb->tags ?: $kb->auto_tags,
-                "kb_file_id" => $kb->id,
-            ]);
-        } catch (\Throwable $e) {
-            // ถ้า network/Qdrant พัง ให้ log ลง DB ด้วย
+        $failures = [];
+        foreach ($chunks as $c) {
+            $embedding = $ollama->getEmbedding($c->content);
+            if (!$embedding) {
+                // try retry once
+                sleep(1);
+                $embedding = $ollama->getEmbedding($c->content);
+            }
+
+            if (!$embedding) {
+                $failures[] = $c->id;
+                // mark chunk error for debugging
+                $c->update(["error" => "embed_failed"]);
+                // log details into kb error_detail (append)
+                $cur = $kb->error_detail ?? "";
+                $cur .= "chunk {$c->id} embed failed; ";
+                $kb->update(["error_detail" => $cur, "progress" => 90]);
+                // continue to next chunk (do not abort whole process)
+                continue;
+            }
+
+            $pointId = $this->upsertPoint(
+                $kb->collection_name,
+                $c->id,
+                $embedding,
+            );
+            if ($pointId === null) {
+                $failures[] = $c->id;
+                $c->update(["error" => "qdrant_upsert_failed"]);
+                $cur = $kb->error_detail ?? "";
+                $cur .= "chunk {$c->id} qdrant_upsert_failed; ";
+                $kb->update(["error_detail" => $cur, "progress" => 92]);
+                continue;
+            }
+
+            $c->update(["point_id" => $pointId, "error" => null]);
+        }
+
+        // set final status
+        if (count($failures) === 0) {
             $kb->update([
-                "status" => "failed",
-                "error_message" => $e->getMessage(),
+                "progress" => 100,
+                "status" => "ready",
+                "error" => null,
+                "error_detail" => null,
             ]);
-
-            // ส่งต่อให้ Laravel mark job ว่า failed (จะเห็นใน queue:failed)
-            throw $e;
-        }
-
-        if ($resp->failed()) {
-            return $kb->update([
-                "status" => "failed",
-                "error_message" => $resp->body(),
+        } else {
+            // partial success
+            $kb->update([
+                "progress" => 98,
+                "status" => "partial",
+                "error" => "partial_embed",
             ]);
         }
-
-        $res = $resp->json();
-
-        $kb->update([
-            "chunks_count" => $res["chunks_count"] ?? 0,
-            "progress" => 100,
-            "status" => "ready",
-        ]);
     }
 }

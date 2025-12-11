@@ -125,9 +125,28 @@ class AnalyzeKbFileJob implements ShouldQueue
             ->values()
             ->toArray();
 
+        $chunks = KbChunk::where("kb_file_id", $kb->id)
+            ->orderBy("chunk_index")
+            ->limit(10)
+            ->pluck("content")
+            ->toArray();
+
+        $textForSummary = implode("\n\n", $chunks);
+        // truncate if very long
+        if (strlen($textForSummary) > 20000) {
+            $textForSummary = substr($textForSummary, 0, 19000);
+        }
+
+        $ollama = new OllamaService();
+        $summary = $ollama->summarizeText($textForSummary, 300);
+
         $kb->update([
             "auto_tags" => $keywords,
-            "progress" => 75,
+            "summary" => $summary,
+            "progress" => 75, // adjust
         ]);
+
+        // optionally dispatch embed job
+        dispatch(new \App\Jobs\EmbedKbFileJob($kb->id));
     }
 }
