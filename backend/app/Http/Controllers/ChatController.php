@@ -9,6 +9,7 @@ use App\Services\QueryService;
 use App\Services\OllamaService;
 use App\Services\AiScoringService;
 use App\Services\KnowledgeStoreService;
+use App\Jobs\GenerateConversationTitleJob;
 
 class ChatController extends Controller
 {
@@ -29,6 +30,10 @@ class ChatController extends Controller
         $this->kb = $kb;
     }
 
+    /* ---------------------------------------------------------
+     *  Conversation CRUD
+     * --------------------------------------------------------- */
+
     public function index()
     {
         return Conversation::withCount("messages")
@@ -43,7 +48,8 @@ class ChatController extends Controller
         ]);
 
         $conversation = Conversation::create([
-            "title" => $req->title ?? "New Conversation",
+            "title" => $req->title ?? "",
+            "is_title_generated" => false,
         ]);
 
         return response()->json($conversation, 201);
@@ -68,6 +74,7 @@ class ChatController extends Controller
 
         $conversation->update([
             "title" => $req->title,
+            "is_title_generated" => true,
         ]);
 
         return $conversation;
@@ -89,8 +96,9 @@ class ChatController extends Controller
     {
         \Log::info("Hit ChatController@message");
 
+        // conversation_id = nullable (ไม่ส่งครั้งแรก)
         $validator = \Validator::make($req->all(), [
-            "conversation_id" => "required|integer|exists:conversations,id",
+            "conversation_id" => "nullable|integer|exists:conversations,id",
             "message" => "required|string",
             "mode" => "nullable|in:test,train",
         ]);
@@ -109,27 +117,60 @@ class ChatController extends Controller
             $mode = $req->mode ?? "test";
             $question = $req->message;
 
-            // 1) Search KB
+            /* -----------------------------------------------------
+             * AUTO CREATE CONVERSATION IF NOT SENT
+             * ----------------------------------------------------- */
+            $conversationId = $req->conversation_id;
+
+            if (!$conversationId) {
+                $conversation = Conversation::create([
+                    "title" => "",
+                    "is_title_generated" => false,
+                ]);
+                $conversationId = $conversation->id;
+            }
+
+            /* -----------------------------------------------------
+             * SAVE USER MESSAGE FIRST
+             * ----------------------------------------------------- */
+            $userMsg = Message::create([
+                "conversation_id" => $conversationId,
+                "role" => "user",
+                "content" => $question,
+                "is_training" => $mode === "train",
+            ]);
+
+            /* -----------------------------------------------------
+             * 1) SEARCH KB
+             * ----------------------------------------------------- */
             $contexts = $this->query->searchKB($question, 4);
 
-            // 2) Build prompt
+            /* -----------------------------------------------------
+             * 2) BUILD PROMPT
+             * ----------------------------------------------------- */
             $prompt = $this->buildRagPrompt($question, $contexts);
 
-            // 3) LLM Answer
+            /* -----------------------------------------------------
+             * 3) LLM ANSWER
+             * ----------------------------------------------------- */
             $answer = $this->llm->generate($prompt);
             if (!is_string($answer) || trim($answer) === "") {
                 $answer = "I’m sorry, I cannot answer right now.";
             }
 
-            // 4) Score (Train Mode Only)
+            /* -----------------------------------------------------
+             * 4) SCORE (TRAIN ONLY)
+             * ----------------------------------------------------- */
             $score = null;
             if ($mode === "train") {
                 $score = $this->scorer->evaluate($question, $answer);
             }
 
-            // 5) Save message
-            $msg = Message::create([
-                "conversation_id" => $req->conversation_id,
+            /* -----------------------------------------------------
+             * 5) SAVE ASSISTANT MESSAGE
+             * ----------------------------------------------------- */
+            $assistantMsg = Message::create([
+                "conversation_id" => $conversationId,
                 "role" => "assistant",
                 "content" => $answer,
                 "score" => $score,
@@ -141,18 +182,21 @@ class ChatController extends Controller
                 ],
             ]);
 
-            // 6) Auto Add to KB (score ≥ 4)
+            /* -----------------------------------------------------
+             * 6) AUTO ADD TO KB (TRAIN MODE + GOOD SCORE)
+             * ----------------------------------------------------- */
             if ($mode === "train" && $score >= 4) {
                 $this->kb->storeText($answer, ["auto_train"]);
-
-                \Log::info("Auto-added to KB", [
-                    "score" => $score,
-                    "answer" => $answer,
-                ]);
             }
 
+            /* -----------------------------------------------------
+             * 7) DISPATCH TITLE GENERATION JOB
+             * ----------------------------------------------------- */
+            GenerateConversationTitleJob::dispatch($conversationId);
+
             return response()->json([
-                "message_id" => $msg->id,
+                "conversation_id" => $conversationId,
+                "message_id" => $assistantMsg->id,
                 "answer" => $answer,
                 "score" => $score,
                 "mode" => $mode,
@@ -194,7 +238,7 @@ class ChatController extends Controller
         }
 
         $header .= <<<RULES
-        - If the answer is not in the context, reply exactly:
+        - If the answer is not in the context, reply:
           "I don't have this information in the knowledge base."
         - Do NOT invent anything new.
         - Keep responses short and clear.
