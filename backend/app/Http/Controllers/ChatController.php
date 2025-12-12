@@ -29,6 +29,58 @@ class ChatController extends Controller
         $this->kb = $kb;
     }
 
+    public function index()
+    {
+        return Conversation::withCount("messages")
+            ->orderBy("created_at", "desc")
+            ->get();
+    }
+
+    public function storeConversation(Request $req)
+    {
+        $req->validate([
+            "title" => "nullable|string",
+        ]);
+
+        $conversation = Conversation::create([
+            "title" => $req->title ?? "New Conversation",
+        ]);
+
+        return response()->json($conversation, 201);
+    }
+
+    public function showConversation(Conversation $conversation)
+    {
+        $conversation->load([
+            "messages" => function ($q) {
+                $q->orderBy("created_at");
+            },
+        ]);
+
+        return $conversation;
+    }
+
+    public function updateConversation(Request $req, Conversation $conversation)
+    {
+        $req->validate([
+            "title" => "required|string",
+        ]);
+
+        $conversation->update([
+            "title" => $req->title,
+        ]);
+
+        return $conversation;
+    }
+
+    public function destroyConversation(Conversation $conversation)
+    {
+        $conversation->messages()->delete();
+        $conversation->delete();
+
+        return response()->json(["status" => "deleted"]);
+    }
+
     /* ---------------------------------------------------------
      *  MAIN CHAT ENDPOINT (TEST / TRAIN)
      * --------------------------------------------------------- */
