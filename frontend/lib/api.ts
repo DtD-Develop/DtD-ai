@@ -93,95 +93,94 @@ export const chatApi = {
   /* ---------------------------------------------------------
    * STREAMING VERSION
    * --------------------------------------------------------- */
-   async sendMessageStream(
-     payload: {
-       conversation_id?: number;
-       message: string;
-       mode?: "test" | "train";
-     },
-     callbacks: {
-       onStart?: (info: {
-         conversation_id: number;
-         user_message_id: number;
-         assistant_message_id: number;
-       }) => void;
-       onChunk?: (chunk: string) => void;
-       onDone?: (final: {
-         conversation_id: number;
-         assistant_message_id: number;
-         answer: string;
-         score?: number | null;
-       }) => void;
-     }
-   ): Promise<void> {
+  async sendMessageStream(
+    payload: {
+      conversation_id?: number;
+      message: string;
+      mode?: "test" | "train";
+    },
+    callbacks: {
+      onStart?: (info: {
+        conversation_id: number;
+        user_message_id: number;
+        assistant_message_id: number;
+      }) => void;
+      onChunk?: (chunk: string) => void;
+      onDone?: (final: {
+        conversation_id: number;
+        assistant_message_id: number;
+        answer: string;
+        score?: number | null;
+      }) => void;
+    },
+  ): Promise<void> {
+    const res = await fetch(`${BASE_URL}/api/chat/message/stream`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-KEY": API_KEY,
+      },
+      body: JSON.stringify(payload),
+    });
 
-     const res = await fetch(`${BASE_URL}/api/chat/message/stream`, {
-       method: "POST",
-       headers: {
-         "Content-Type": "application/json",
-         "X-API-KEY": API_KEY,
-       },
-       body: JSON.stringify(payload),
-     });
+    if (!res.ok || !res.body) {
+      const text = await res.text();
+      throw new Error(text || `HTTP ${res.status}`);
+    }
 
-     if (!res.ok || !res.body) {
-       const text = await res.text();
-       throw new Error(text || `HTTP ${res.status}`);
-     }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
 
-     const reader = res.body.getReader();
-     const decoder = new TextDecoder();
-     let buffer = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-     while (true) {
-       const { done, value } = await reader.read();
-       if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
 
-       buffer += decoder.decode(value, { stream: true });
-       const lines = buffer.split("\n");
-       buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
 
-       for (const line of lines) {
-         const trimmed = line.trim();
-         if (!trimmed) continue;
+        let obj;
+        try {
+          obj = JSON.parse(trimmed);
+        } catch (err) {
+          console.warn("Failed JSON", trimmed);
+          continue;
+        }
 
-         let obj;
-         try {
-           obj = JSON.parse(trimmed);
-         } catch (err) {
-           console.warn("Failed JSON", trimmed);
-           continue;
-         }
+        // 🌟 START event
+        if (obj.type === "start") {
+          callbacks.onStart?.({
+            conversation_id: obj.conversation_id,
+            user_message_id: obj.user_message_id,
+            assistant_message_id: obj.assistant_message_id,
+          });
+          continue;
+        }
 
-         // 🌟 START event
-         if (obj.type === "start") {
-           callbacks.onStart?.({
-             conversation_id: obj.conversation_id,
-             user_message_id: obj.user_message_id,
-             assistant_message_id: obj.assistant_message_id,
-           });
-           continue;
-         }
+        // 🌟 CHUNK event
+        if (obj.type === "chunk") {
+          callbacks.onChunk?.(obj.chunk);
+          continue;
+        }
 
-         // 🌟 CHUNK event
-         if (obj.type === "chunk") {
-           callbacks.onChunk?.(obj.chunk);
-           continue;
-         }
-
-         // 🌟 DONE event
-         if (obj.type === "done") {
-           callbacks.onDone?.({
-             conversation_id: obj.conversation_id,
-             assistant_message_id: obj.assistant_message_id,
-             answer: obj.answer,
-             score: obj.score ?? null,
-           });
-           continue;
-         }
-       }
-     }
-   }
+        // 🌟 DONE event
+        if (obj.type === "done") {
+          callbacks.onDone?.({
+            conversation_id: obj.conversation_id,
+            assistant_message_id: obj.assistant_message_id,
+            answer: obj.answer,
+            score: obj.score ?? null,
+          });
+          continue;
+        }
+      }
+    }
+  },
 
   /* ---------------------------------------------------------
    * RATE MESSAGE
