@@ -1,6 +1,4 @@
-const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "";
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "";
-
+// lib/api.ts
 export type Conversation = {
   id: number;
   title: string;
@@ -34,43 +32,59 @@ export type SendMessageResponse = {
   score?: number | null;
 };
 
-const BASE = "/api";
+// ใช้ BASE_URL + API_KEY จาก env แทน BASE เดิม
+const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "";
+const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "";
 
-async function handleJsonResponse(res: Response) {
+// helper สำหรับเรียก API ให้แน่ใจว่าแนบ X-API-KEY ทุกครั้ง
+async function ChatFetch<T>(
+  path: string,
+  options: RequestInit = {},
+): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    ...options,
+    headers: {
+      "X-API-KEY": API_KEY,
+      ...(options.headers || {}),
+    },
+  });
+
   if (!res.ok) {
     const body = await res.text();
     throw new Error(body || `HTTP ${res.status}`);
   }
+
   return res.json();
 }
 
 export const chatApi = {
   async getConversations(): Promise<Conversation[]> {
-    const res = await fetch(`${BASE}/chat/conversations`, { method: "GET" });
-    return handleJsonResponse(res);
+    return ChatFetch<Conversation[]>("/api/chat/conversations", {
+      method: "GET",
+    });
   },
 
   async getConversation(id: number): Promise<ConversationWithMessages> {
-    const res = await fetch(`${BASE}/chat/conversations/${id}`, {
-      method: "GET",
-    });
-    return handleJsonResponse(res);
+    return ChatFetch<ConversationWithMessages>(
+      `/api/chat/conversations/${id}`,
+      {
+        method: "GET",
+      },
+    );
   },
 
   async deleteConversation(id: number) {
-    const res = await fetch(`${BASE}/chat/conversations/${id}`, {
+    return ChatFetch(`/api/chat/conversations/${id}`, {
       method: "DELETE",
     });
-    return handleJsonResponse(res);
   },
 
   async updateConversation(id: number, payload: any) {
-    const res = await fetch(`${BASE}/chat/conversations/${id}`, {
+    return ChatFetch(`/api/chat/conversations/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    return handleJsonResponse(res);
   },
 
   async sendMessage(payload: {
@@ -78,12 +92,11 @@ export const chatApi = {
     message: string;
     mode?: "test" | "train";
   }): Promise<SendMessageResponse> {
-    const res = await fetch(`${BASE}/chat/message`, {
+    return ChatFetch<SendMessageResponse>("/api/chat/message", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-KEY": API_KEY },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    return handleJsonResponse(res);
   },
 
   /**
@@ -114,9 +127,13 @@ export const chatApi = {
       }) => void;
     },
   ): Promise<void> {
-    const res = await fetch(`${BASE}/chat/message/stream`, {
+    // stream ต้องใช้ fetch ตรง ๆ เพื่อเข้าถึง res.body, แต่ยังคงแนบ X-API-KEY เหมือนเดิม
+    const res = await fetch(`${BASE_URL}/api/chat/message/stream`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-KEY": API_KEY,
+      },
       body: JSON.stringify(payload),
     });
 
@@ -125,18 +142,14 @@ export const chatApi = {
       throw new Error(text || `HTTP ${res.status}`);
     }
 
-    // Read the stream as text chunks, parse newline-delimited JSON
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
 
-    // We expect backend to send lines like: { "type":"chunk", ... }\n  or { "type": "done", ... }\n
-    // The first chunk may include an initial "start" or "chunk".
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
-      // split lines
       const lines = buffer.split("\n");
       buffer = lines.pop() ?? "";
 
@@ -146,15 +159,12 @@ export const chatApi = {
         try {
           const payload = JSON.parse(trimmed);
           if (payload.type === "chunk") {
-            // first chunk might carry ids; call onStart if present and not yet called
             if (callbacks.onStart) {
               callbacks.onStart({
                 conversation_id: payload.conversation_id,
                 assistant_message_id: payload.assistant_message_id,
                 user_message_id: payload.user_message_id,
               });
-              // nullify so we don't call again (but we won't nullify here to keep simple)
-              // we rely on frontend to ignore duplicates
               callbacks.onStart = undefined;
             }
             if (callbacks.onChunk) callbacks.onChunk(payload.chunk);
@@ -168,7 +178,6 @@ export const chatApi = {
               });
           }
         } catch (err) {
-          // ignore parse errors for partial lines
           console.warn("Failed parse stream line", err, trimmed);
         }
       }
@@ -176,19 +185,16 @@ export const chatApi = {
   },
 
   async rateMessage(messageId: number, payload: { score: number }) {
-    const res = await fetch(`${BASE}/chat/messages/${messageId}/rate`, {
+    return ChatFetch(`/api/chat/messages/${messageId}/rate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    return handleJsonResponse(res);
   },
 
   async summarizeConversation(conversationId: number) {
-    const res = await fetch(
-      `${BASE}/chat/conversations/${conversationId}/summarize`,
-      { method: "POST" },
-    );
-    return handleJsonResponse(res);
+    return ChatFetch(`/api/chat/conversations/${conversationId}/summarize`, {
+      method: "POST",
+    });
   },
 };
