@@ -11,8 +11,9 @@ type Props = {
   children?: React.ReactNode; // rating stars, etc.
 };
 
-export function ChatBubble({ message, children }: Props) {
+export function ChatBubble({ message, isStreaming, children }: Props) {
   const isAssistant = message.role === "assistant";
+
   const isLoading =
     isAssistant &&
     (isStreaming || !message.content || message.content.trim() === "");
@@ -32,36 +33,28 @@ export function ChatBubble({ message, children }: Props) {
             : "bg-blue-600 text-white border-blue-600",
         )}
       >
-        {/* ---------------------------------- */}
         {/* USER TEXT */}
-        {/* ---------------------------------- */}
         {!isAssistant && (
           <div className="whitespace-pre-wrap break-words text-sm">
             {message.content}
           </div>
         )}
 
-        {/* ---------------------------------- */}
-        {/* ASSISTANT LOADING / SKELETON */}
-        {/* ---------------------------------- */}
+        {/* ASSISTANT LOADING */}
         {isAssistant && isLoading && (
           <div className="flex items-center gap-2 py-1">
             <TypingDots />
           </div>
         )}
 
-        {/* ---------------------------------- */}
         {/* ASSISTANT TEXT */}
-        {/* ---------------------------------- */}
         {isAssistant && !isLoading && (
           <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">
             {message.content}
           </div>
         )}
 
-        {/* ---------------------------------- */}
-        {/* Optional Rating Stars, etc. */}
-        {/* ---------------------------------- */}
+        {/* Extra children (rating stars) */}
         {children && (
           <div className="mt-2 border-t pt-2 border-gray-200">{children}</div>
         )}
@@ -70,9 +63,6 @@ export function ChatBubble({ message, children }: Props) {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*   Typing Indicator Component (Animated Ellipsis "..." ChatGPT style) */
-/* ------------------------------------------------------------------ */
 function TypingDots() {
   return (
     <div className="flex items-center space-x-1">
@@ -83,9 +73,6 @@ function TypingDots() {
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*   Skeleton Loading Block For Streaming (Optional, advanced usage)  */
-/* ------------------------------------------------------------------ */
 export function SkeletonBlock() {
   return (
     <div className="w-full">
