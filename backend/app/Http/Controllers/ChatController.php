@@ -82,6 +82,11 @@ class ChatController extends Controller
 
     public function message(Request $req)
     {
+        \Log::info("Hit ChatController@message", [
+            "path" => $req->path(),
+            "headers" => $req->headers->all(),
+        ]);
+
         $req->validate([
             "conversation_id" => "required|integer|exists:conversations,id",
             "message" => "required|string",

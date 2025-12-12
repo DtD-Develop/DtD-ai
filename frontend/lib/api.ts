@@ -43,7 +43,6 @@ async function apiFetch<T>(
     },
     cache: "no-store",
   });
-  console.log(API_KEY);
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`API error ${res.status}: ${text}`);
