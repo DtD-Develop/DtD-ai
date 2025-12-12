@@ -82,57 +82,38 @@ class ChatController extends Controller
 
     public function message(Request $req)
     {
-        // {
-        //     $req->validate([
-        //         "conversation_id" => "required|integer|exists:conversations,id",
-        //         "message" => "required|string",
-        //         "mode" => "nullable|in:test,train",
-        //     ]);
-
-        //     $question = $req->message;
-
-        //     /* 1) SEARCH KNOWLEDGE BASE */
-        //     $contexts = $this->query->searchKB($question, 4);
-
-        //     /* 2) BUILD RAG PROMPT (English) */
-        //     $prompt = $this->buildRagPrompt($question, $contexts);
-
-        //     /* 3) GENERATE ANSWER FROM LLM */
-        //     $answer = $this->llm->generate($prompt);
-
-        //     /* 4) SAVE MESSAGE HISTORY */
-        //     $msg = Message::create([
-        //         "conversation_id" => $req->conversation_id,
-        //         "question" => $question,
-        //         "answer" => $answer,
-        //         "mode" => $req->mode ?? "test",
-        //         "rag_context" => json_encode($contexts),
-        //     ]);
-
-        //     return response()->json([
-        //         "message_id" => $msg->id,
-        //         "answer" => $answer,
-        //         "kb_hits" => $contexts,
-        //         "rag_prompt" => $prompt,
-        //     ]);
-        // }
-
         \Log::info("Hit ChatController@message", [
             "path" => $req->path(),
         ]);
 
+        $req->validate([
+            "conversation_id" => "required|integer|exists:conversations,id",
+            "message" => "required|string",
+            "mode" => "nullable|in:test,train",
+        ]);
+
+        $question = $req->message;
+
+        $contexts = $this->query->searchKB($question, 4);
+        $prompt = $this->buildRagPrompt($question, $contexts);
+        $answer = $this->llm->generate($prompt);
+
+        $msg = Message::create([
+            "conversation_id" => $req->conversation_id,
+            "question" => $question,
+            "answer" => $answer,
+            "mode" => $req->mode ?? "test",
+            "rag_context" => json_encode($contexts),
+        ]);
+
         $resp = response()->json([
-            "ok" => true,
-            "echo" => $req->all(),
+            "message_id" => $msg->id,
+            "answer" => $answer,
+            "kb_hits" => $contexts,
+            "rag_prompt" => $prompt,
         ]);
 
-        // DEBUG: mark that we are returning from ChatController
         $resp->headers->set("X-Debug-Controller", "ChatController-message");
-
-        \Log::info("Response debug", [
-            "status" => $resp->getStatusCode(),
-            "headers" => $resp->headers->all(),
-        ]);
 
         return $resp;
     }
