@@ -68,4 +68,12 @@ Route::middleware(["api-key", "api-log"])->group(function () {
         ChatController::class,
         "rate",
     ]);
+    Route::post("/chat/message/stream", [
+        ChatController::class,
+        "messageStream",
+    ]);
+    Route::post("/chat/conversations/{conversation}/summarize", [
+        ChatController::class,
+        "summarizeConversation",
+    ]);
 });

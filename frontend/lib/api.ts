@@ -1,13 +1,10 @@
 // lib/api.ts
 export type Conversation = {
   id: number;
-  user_id: string;
   title: string;
   mode: "test" | "train";
-  is_title_generated: boolean;
-  last_message_at: string | null;
-  created_at?: string;
-  updated_at?: string;
+  last_message_at?: string | null;
+  summary?: string | null;
 };
 
 export type Message = {
@@ -15,95 +12,181 @@ export type Message = {
   conversation_id: number;
   role: "user" | "assistant";
   content: string;
-  score: number | null;
-  is_training: boolean;
-  meta: any;
-  rated_at: string | null;
-  created_at?: string;
-  updated_at?: string;
+  score?: number | null;
+  is_training?: boolean;
+  meta?: any | null;
+  rated_at?: string | null;
 };
 
 export type ConversationWithMessages = Conversation & {
   messages: Message[];
 };
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "";
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "";
+export type SendMessageResponse = {
+  conversation_id: number;
+  conversation_mode?: "test" | "train";
+  user_message_id: number;
+  assistant_message_id: number;
+  answer: string;
+  kb_hits: any[];
+  score?: number | null;
+};
 
-async function apiFetch<T>(
-  path: string,
-  options: RequestInit = {},
-): Promise<T> {
-  const res = await fetch(`${BASE_URL}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      "X-API-KEY": API_KEY,
-      ...(options.headers || {}),
-    },
-    cache: "no-store",
-  });
+const BASE = "/api";
+
+async function handleJsonResponse(res: Response) {
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`API error ${res.status}: ${text}`);
+    const body = await res.text();
+    throw new Error(body || `HTTP ${res.status}`);
   }
-
   return res.json();
 }
 
 export const chatApi = {
-  getConversations(): Promise<Conversation[]> {
-    return apiFetch<Conversation[]>("/api/chat/conversations");
+  async getConversations(): Promise<Conversation[]> {
+    const res = await fetch(`${BASE}/chat/conversations`, { method: "GET" });
+    return handleJsonResponse(res);
   },
 
-  getConversation(id: number): Promise<ConversationWithMessages> {
-    return apiFetch<ConversationWithMessages>(`/api/chat/conversations/${id}`);
-  },
-
-  updateConversation(
-    id: number,
-    data: Partial<Pick<Conversation, "title" | "mode">>,
-  ): Promise<Conversation> {
-    return apiFetch<Conversation>(`/api/chat/conversations/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify(data),
+  async getConversation(id: number): Promise<ConversationWithMessages> {
+    const res = await fetch(`${BASE}/chat/conversations/${id}`, {
+      method: "GET",
     });
+    return handleJsonResponse(res);
   },
 
-  deleteConversation(id: number): Promise<{ status: string }> {
-    return apiFetch<{ status: string }>(`/api/chat/conversations/${id}`, {
+  async deleteConversation(id: number) {
+    const res = await fetch(`${BASE}/chat/conversations/${id}`, {
       method: "DELETE",
     });
+    return handleJsonResponse(res);
   },
 
-  sendMessage(payload: {
-    conversation_id?: number | null;
-    message: string;
-    mode?: "test" | "train";
-  }): Promise<{
-    conversation_id: number;
-    conversation_mode: "test" | "train";
-    user_message_id: number;
-    assistant_message_id: number;
-    answer: string;
-    kb_hits: any[];
-  }> {
-    return apiFetch("/api/chat/message", {
-      method: "POST",
+  async updateConversation(id: number, payload: any) {
+    const res = await fetch(`${BASE}/chat/conversations/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+    return handleJsonResponse(res);
   },
 
-  rateMessage(
-    messageId: number,
-    data: { score: number; comment?: string },
-  ): Promise<{
-    status: string;
-    message: Message;
-  }> {
-    return apiFetch(`/api/chat/messages/${messageId}/rate`, {
+  async sendMessage(payload: {
+    conversation_id?: number;
+    message: string;
+    mode?: "test" | "train";
+  }): Promise<SendMessageResponse> {
+    const res = await fetch(`${BASE}/chat/message`, {
       method: "POST",
-      body: JSON.stringify(data),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
+    return handleJsonResponse(res);
+  },
+
+  /**
+   * sendMessageStream:
+   * - payload same as sendMessage
+   * - callbacks: onStart(info), onChunk(chunk), onDone(final)
+   *
+   * Backend returns newline-delimited JSON lines (NDJSON): each line is a JSON object with type chunk/done
+   */
+  async sendMessageStream(
+    payload: {
+      conversation_id?: number;
+      message: string;
+      mode?: "test" | "train";
+    },
+    callbacks: {
+      onStart?: (info: {
+        conversation_id: number;
+        assistant_message_id: number;
+        user_message_id?: number;
+      }) => void;
+      onChunk?: (chunk: string) => void;
+      onDone?: (final: {
+        conversation_id: number;
+        assistant_message_id: number;
+        answer: string;
+        score?: number | null;
+      }) => void;
+    },
+  ): Promise<void> {
+    const res = await fetch(`${BASE}/chat/message/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok || !res.body) {
+      const text = await res.text();
+      throw new Error(text || `HTTP ${res.status}`);
+    }
+
+    // Read the stream as text chunks, parse newline-delimited JSON
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    // We expect backend to send lines like: { "type":"chunk", ... }\n  or { "type": "done", ... }\n
+    // The first chunk may include an initial "start" or "chunk".
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      // split lines
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          const payload = JSON.parse(trimmed);
+          if (payload.type === "chunk") {
+            // first chunk might carry ids; call onStart if present and not yet called
+            if (callbacks.onStart) {
+              callbacks.onStart({
+                conversation_id: payload.conversation_id,
+                assistant_message_id: payload.assistant_message_id,
+                user_message_id: payload.user_message_id,
+              });
+              // nullify so we don't call again (but we won't nullify here to keep simple)
+              // we rely on frontend to ignore duplicates
+              callbacks.onStart = undefined;
+            }
+            if (callbacks.onChunk) callbacks.onChunk(payload.chunk);
+          } else if (payload.type === "done") {
+            if (callbacks.onDone)
+              callbacks.onDone({
+                conversation_id: payload.conversation_id,
+                assistant_message_id: payload.assistant_message_id,
+                answer: payload.answer,
+                score: payload.score ?? null,
+              });
+          }
+        } catch (err) {
+          // ignore parse errors for partial lines
+          console.warn("Failed parse stream line", err, trimmed);
+        }
+      }
+    }
+  },
+
+  async rateMessage(messageId: number, payload: { score: number }) {
+    const res = await fetch(`${BASE}/chat/messages/${messageId}/rate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    return handleJsonResponse(res);
+  },
+
+  async summarizeConversation(conversationId: number) {
+    const res = await fetch(
+      `${BASE}/chat/conversations/${conversationId}/summarize`,
+      { method: "POST" },
+    );
+    return handleJsonResponse(res);
   },
 };

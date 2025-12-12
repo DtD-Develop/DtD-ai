@@ -1,29 +1,96 @@
-import { Message } from "@/lib/api";
+import React from "react";
+import { cn } from "@/lib/utils";
 
 type Props = {
-  message: Message;
-  children?: React.ReactNode; // สำหรับ stars + badge
+  message: {
+    id: number;
+    role: "user" | "assistant";
+    content: string;
+  };
+  children?: React.ReactNode; // rating stars, etc.
 };
 
 export function ChatBubble({ message, children }: Props) {
-  const isUser = message.role === "user";
+  const isAssistant = message.role === "assistant";
+  const isLoading =
+    isAssistant && (!message.content || message.content.trim() === "");
 
   return (
-    <div className={`flex mb-2 ${isUser ? "justify-end" : "justify-start"}`}>
+    <div
+      className={cn(
+        "w-full mb-4 flex",
+        isAssistant ? "justify-start" : "justify-end",
+      )}
+    >
       <div
-        className={`max-w-[80%] flex flex-col ${isUser ? "items-end" : "items-start"}`}
+        className={cn(
+          "max-w-[85%] rounded-xl px-4 py-3 shadow-sm border",
+          isAssistant
+            ? "bg-white text-gray-900 border-gray-200"
+            : "bg-blue-600 text-white border-blue-600",
+        )}
       >
-        <div
-          className={`px-3 py-2 rounded-2xl text-sm whitespace-pre-wrap break-words
-          ${
-            isUser
-              ? "bg-blue-500 text-white rounded-br-sm"
-              : "bg-muted text-foreground rounded-bl-sm"
-          }`}
-        >
-          {message.content}
-        </div>
-        {children}
+        {/* ---------------------------------- */}
+        {/* USER TEXT */}
+        {/* ---------------------------------- */}
+        {!isAssistant && (
+          <div className="whitespace-pre-wrap break-words text-sm">
+            {message.content}
+          </div>
+        )}
+
+        {/* ---------------------------------- */}
+        {/* ASSISTANT LOADING / SKELETON */}
+        {/* ---------------------------------- */}
+        {isAssistant && isLoading && (
+          <div className="flex items-center gap-2 py-1">
+            <TypingDots />
+          </div>
+        )}
+
+        {/* ---------------------------------- */}
+        {/* ASSISTANT TEXT */}
+        {/* ---------------------------------- */}
+        {isAssistant && !isLoading && (
+          <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+            {message.content}
+          </div>
+        )}
+
+        {/* ---------------------------------- */}
+        {/* Optional Rating Stars, etc. */}
+        {/* ---------------------------------- */}
+        {children && (
+          <div className="mt-2 border-t pt-2 border-gray-200">{children}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*   Typing Indicator Component (Animated Ellipsis "..." ChatGPT style) */
+/* ------------------------------------------------------------------ */
+function TypingDots() {
+  return (
+    <div className="flex items-center space-x-1">
+      <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce [animation-delay:-0.3s]" />
+      <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce [animation-delay:-0.15s]" />
+      <span className="h-2 w-2 rounded-full bg-gray-400 animate-bounce" />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*   Skeleton Loading Block For Streaming (Optional, advanced usage)  */
+/* ------------------------------------------------------------------ */
+export function SkeletonBlock() {
+  return (
+    <div className="w-full">
+      <div className="animate-pulse flex flex-col gap-2">
+        <div className="h-3 w-4/5 bg-gray-200 rounded"></div>
+        <div className="h-3 w-3/5 bg-gray-200 rounded"></div>
+        <div className="h-3 w-2/5 bg-gray-200 rounded"></div>
       </div>
     </div>
   );
