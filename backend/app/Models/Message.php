@@ -14,17 +14,10 @@ class Message extends Model
         "score",
         "is_training",
         "meta",
-        "rated_at",
     ];
 
     protected $casts = [
         "is_training" => "boolean",
         "meta" => "array",
-        "rated_at" => "datetime",
     ];
-
-    public function conversation(): BelongsTo
-    {
-        return $this->belongsTo(Conversation::class);
-    }
 }

@@ -7,82 +7,35 @@ use App\Models\Conversation;
 use App\Models\Message;
 use App\Services\QueryService;
 use App\Services\OllamaService;
+use App\Services\AiScoringService;
+use App\Services\KnowledgeStoreService;
 
 class ChatController extends Controller
 {
     protected QueryService $query;
     protected OllamaService $llm;
+    protected AiScoringService $scorer;
+    protected KnowledgeStoreService $kb;
 
-    public function __construct(QueryService $query, OllamaService $llm)
-    {
+    public function __construct(
+        QueryService $query,
+        OllamaService $llm,
+        AiScoringService $scorer,
+        KnowledgeStoreService $kb,
+    ) {
         $this->query = $query;
         $this->llm = $llm;
+        $this->scorer = $scorer;
+        $this->kb = $kb;
     }
 
     /* ---------------------------------------------------------
-     *  Conversation CRUD
-     * --------------------------------------------------------- */
-
-    public function index()
-    {
-        return Conversation::withCount("messages")
-            ->orderBy("created_at", "desc")
-            ->get();
-    }
-
-    public function storeConversation(Request $req)
-    {
-        $req->validate([
-            "title" => "nullable|string",
-        ]);
-
-        $conversation = Conversation::create([
-            "title" => $req->title ?? "New Conversation",
-        ]);
-
-        return response()->json($conversation, 201);
-    }
-
-    public function showConversation(Conversation $conversation)
-    {
-        $conversation->load([
-            "messages" => function ($q) {
-                $q->orderBy("created_at");
-            },
-        ]);
-
-        return $conversation;
-    }
-
-    public function updateConversation(Request $req, Conversation $conversation)
-    {
-        $req->validate([
-            "title" => "required|string",
-        ]);
-
-        $conversation->update([
-            "title" => $req->title,
-        ]);
-
-        return $conversation;
-    }
-
-    public function destroyConversation(Conversation $conversation)
-    {
-        $conversation->messages()->delete();
-        $conversation->delete();
-
-        return response()->json(["status" => "deleted"]);
-    }
-
-    /* ---------------------------------------------------------
-     *  MAIN CHAT ENDPOINT (RAG)
-     *  POST /chat/message
+     *  MAIN CHAT ENDPOINT (TEST / TRAIN)
      * --------------------------------------------------------- */
 
     public function message(Request $req)
     {
-        \Log::info("Hit ChatController@message", ["path" => $req->path()]);
+        \Log::info("Hit ChatController@message");
 
         $validator = \Validator::make($req->all(), [
             "conversation_id" => "required|integer|exists:conversations,id",
@@ -101,37 +54,57 @@ class ChatController extends Controller
         }
 
         try {
+            $mode = $req->mode ?? "test";
             $question = $req->message;
 
-            // ---- SEARCH KB ----
+            // 1) Search KB
             $contexts = $this->query->searchKB($question, 4);
 
-            // ---- BUILD PROMPT ----
+            // 2) Build prompt
             $prompt = $this->buildRagPrompt($question, $contexts);
 
-            // ---- CALL LLM ----
+            // 3) LLM Answer
             $answer = $this->llm->generate($prompt);
-
-            // fallback เมื่อ Ollama ไม่ตอบ
             if (!is_string($answer) || trim($answer) === "") {
-                \Log::warning("LLM returned no answer, using fallback.");
                 $answer = "I’m sorry, I cannot answer right now.";
             }
 
-            // ---- SAVE MESSAGE ----
+            // 4) Score (Train Mode Only)
+            $score = null;
+            if ($mode === "train") {
+                $score = $this->scorer->evaluate($question, $answer);
+            }
+
+            // 5) Save message
             $msg = Message::create([
                 "conversation_id" => $req->conversation_id,
-                "question" => $question ?? "",
-                "answer" => $answer ?? "",
-                "mode" => $req->mode ?? "test",
-                "rag_context" => json_encode($contexts ?? []),
+                "role" => "assistant",
+                "content" => $answer,
+                "score" => $score,
+                "is_training" => $mode === "train",
+                "meta" => [
+                    "question" => $question,
+                    "rag_context" => $contexts,
+                    "rag_prompt" => $prompt,
+                ],
             ]);
+
+            // 6) Auto Add to KB (score ≥ 4)
+            if ($mode === "train" && $score >= 4) {
+                $this->kb->storeText($answer, ["auto_train"]);
+
+                \Log::info("Auto-added to KB", [
+                    "score" => $score,
+                    "answer" => $answer,
+                ]);
+            }
 
             return response()->json([
                 "message_id" => $msg->id,
                 "answer" => $answer,
+                "score" => $score,
+                "mode" => $mode,
                 "kb_hits" => $contexts,
-                "rag_prompt" => $prompt,
             ]);
         } catch (\Throwable $e) {
             \Log::error("ChatController@message exception", [
@@ -149,55 +122,32 @@ class ChatController extends Controller
     }
 
     /* ---------------------------------------------------------
-     *  Manual Rating Endpoint
-     *  POST /chat/messages/{message}/rate
-     * --------------------------------------------------------- */
-
-    public function rate(Request $req, Message $message)
-    {
-        $req->validate([
-            "score" => "required|in:good,bad",
-        ]);
-
-        $message->update([
-            "manual_score" => $req->score,
-        ]);
-
-        return [
-            "status" => "ok",
-            "message_id" => $message->id,
-            "manual_score" => $message->manual_score,
-        ];
-    }
-
-    /* ---------------------------------------------------------
      *  RAG PROMPT BUILDER
      * --------------------------------------------------------- */
 
     protected function buildRagPrompt(string $query, array $contexts): string
     {
         $header =
-            "You are an AI assistant that answers ONLY using the information provided in the Knowledge Base below.\n\n";
+            "You are an AI assistant that answers ONLY using the information in the Knowledge Base.\n\n";
 
         if (count($contexts) === 0) {
-            $header .= "[NO CONTEXT AVAILABLE]\n\n";
+            $header .= "[NO CONTEXT]\n\n";
         } else {
-            $header .= "[KNOWLEDGE BASE CONTEXT]\n";
+            $header .= "[KB CONTEXT]\n";
             foreach ($contexts as $i => $c) {
                 $text = trim($c["payload"]["text"] ?? "");
-                $header .= "[" . ($i + 1) . "] " . $text . "\n\n";
+                $header .= "[" . ($i + 1) . "] $text\n\n";
             }
-            $header .= "[END OF CONTEXT]\n\n";
+            $header .= "[END CONTEXT]\n\n";
         }
 
         $header .= <<<RULES
-        Rules:
-        - If the answer is not in the context, reply: "I don't have this information in the knowledge base."
-        - Do NOT invent information that is not in the provided KB context.
-        - Keep answers concise, factual, and well-structured.
-        - If relevant, cite which snippet(s) your answer is based on.
+        - If the answer is not in the context, reply exactly:
+          "I don't have this information in the knowledge base."
+        - Do NOT invent anything new.
+        - Keep responses short and clear.
         RULES;
 
-        return $header . "\n\nUser Question:\n\"{$query}\"\n\nFinal Answer:\n";
+        return $header . "\n\nUser Question:\n\"{$query}\"\n\nAnswer:\n";
     }
 }
