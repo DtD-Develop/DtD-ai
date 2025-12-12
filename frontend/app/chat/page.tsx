@@ -361,7 +361,10 @@ export default function ChatPage() {
         </div>
 
         {/* MESSAGES */}
-        <div className="flex-1 overflow-y-auto px-4 py-3" onScroll={handleScroll}>
+        <div
+          className="flex-1 overflow-y-auto px-4 py-3"
+          onScroll={handleScroll}
+        >
           {error && <div className="mb-2 text-xs text-red-500">{error}</div>}
 
           {loadingMessages && (
@@ -380,7 +383,11 @@ export default function ChatPage() {
           )}
 
           {activeConv?.messages?.map((m) => (
-            <ChatBubble message={m} isStreaming={m.id === streamingMsgId} />
+            <ChatBubble
+              key={m.id}
+              message={m}
+              isStreaming={m.id === streamingMsgId}
+            >
               {m.role === "assistant" && currentMode === "train" && (
                 <RatingStars
                   initialScore={m.score}
