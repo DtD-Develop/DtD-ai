@@ -6,7 +6,6 @@ import {
   Conversation,
   ConversationWithMessages,
   Message,
-  SendMessageResponse,
 } from "@/lib/api";
 
 import { ConversationList } from "@/components/chat/conversation-list";
@@ -30,61 +29,53 @@ export default function ChatPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [pendingMode, setPendingMode] = useState<Mode>("test");
+  const [streamingMsgId, setStreamingMsgId] = useState<number | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-
   const [autoScroll, setAutoScroll] = useState(true);
 
-  /* ------------------------------------------------------------------ */
-  /* Load Conversations List */
-  /* ------------------------------------------------------------------ */
+  /* ---------------------------------------------- */
+  /* Load conversation list on mount                */
+  /* ---------------------------------------------- */
   useEffect(() => {
     refreshConversations();
   }, []);
 
-  /* Load messages when selecting conversation */
+  /* ---------------------------------------------- */
+  /* Load messages when activeId changes            */
+  /* ---------------------------------------------- */
   useEffect(() => {
-    if (activeId != null) {
-      loadConversation(activeId);
-    } else {
-      setActiveConv(null);
-    }
+    if (activeId != null) loadConversation(activeId);
+    else setActiveConv(null);
   }, [activeId]);
 
-  /* Auto scroll to bottom */
+  /* ---------------------------------------------- */
+  /* Auto-scroll when new message arrived           */
+  /* ---------------------------------------------- */
   useEffect(() => {
-    const lastMsg = activeConv?.messages?.[activeConv.messages.length - 1];
+    if (!activeConv?.messages) return;
+    if (!autoScroll) return;
 
-    if (!lastMsg) return;
-
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({
-        behavior: "smooth",
-        block: "end",
-      });
-    }
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [activeConv?.messages]);
 
-  /* Determine active mode (test or train) */
+  /* ---------------------------------------------- */
+  /* Calculate current mode                         */
+  /* ---------------------------------------------- */
   const currentMode: Mode = useMemo(() => {
     if (activeConv) return activeConv.mode;
     return pendingMode;
   }, [activeConv, pendingMode]);
 
-  /* ------------------------------------------------------------------ */
-  /* Fetch Conversations */
-  /* ------------------------------------------------------------------ */
+  /* ---------------------------------------------- */
   async function refreshConversations() {
     setLoadingConvs(true);
     setError(null);
-
     try {
-      const data = await chatApi.getConversations();
-      setConversations(data);
+      const list = await chatApi.getConversations();
+      setConversations(list);
 
-      if (data.length > 0 && activeId === null) {
-        setActiveId(data[0].id);
-      }
+      if (list.length > 0 && activeId === null) setActiveId(list[0].id);
     } catch (e: any) {
       setError(e.message ?? "Failed to load conversations.");
     } finally {
@@ -92,11 +83,9 @@ export default function ChatPage() {
     }
   }
 
-  /* ------------------------------------------------------------------ */
   async function loadConversation(id: number) {
-    setLoadingMessages(true);
     setError(null);
-
+    setLoadingMessages(true);
     try {
       const data = await chatApi.getConversation(id);
       setActiveConv(data);
@@ -107,20 +96,19 @@ export default function ChatPage() {
     }
   }
 
-  /* ------------------------------------------------------------------ */
+  /* ---------------------------------------------- */
   function handleNewChat() {
     setActiveId(null);
     setActiveConv(null);
     setPendingMode("test");
   }
 
-  /* ------------------------------------------------------------------ */
+  /* ---------------------------------------------- */
   async function handleDeleteConversation(id: number) {
-    if (!confirm("Are you sure you want to delete this conversation?")) return;
+    if (!confirm("Delete this conversation?")) return;
 
     try {
       await chatApi.deleteConversation(id);
-
       const next = conversations.filter((c) => c.id !== id);
       setConversations(next);
 
@@ -133,35 +121,36 @@ export default function ChatPage() {
     }
   }
 
-  /* ------------------------------------------------------------------ */
+  /* ---------------------------------------------- */
   async function handleModeChange(newMode: Mode) {
-    if (activeConv) {
-      try {
-        const updated = await chatApi.updateConversation(activeConv.id, {
-          mode: newMode,
-        });
-
-        setActiveConv({ ...activeConv, mode: updated.mode });
-
-        setConversations((prev) =>
-          prev.map((c) =>
-            c.id === updated.id ? { ...c, mode: updated.mode } : c,
-          ),
-        );
-      } catch (e: any) {
-        alert(e.message ?? "Failed to change mode.");
-      }
-    } else {
+    if (!activeConv) {
       setPendingMode(newMode);
+      return;
+    }
+
+    try {
+      const updated = await chatApi.updateConversation(activeConv.id, {
+        mode: newMode,
+      });
+
+      setActiveConv({ ...activeConv, mode: updated.mode });
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === updated.id ? { ...c, mode: updated.mode } : c,
+        ),
+      );
+    } catch (e: any) {
+      alert(e.message ?? "Failed to change mode.");
     }
   }
 
-  /* ------------------------------------------------------------------ */
-  /* SEND MESSAGE + STREAMING SUPPORT */
-  /* ------------------------------------------------------------------ */
+  /* ---------------------------------------------- */
+  /* SEND MESSAGE WITH STREAMING                    */
+  /* ---------------------------------------------- */
   async function handleSend(text: string) {
     setSending(true);
     setError(null);
+    setStreamingMsgId(null);
 
     try {
       const payload: {
@@ -171,18 +160,14 @@ export default function ChatPage() {
       } = { message: text };
 
       if (activeConv?.id) payload.conversation_id = activeConv.id;
-      else payload.mode = currentMode; // for new chat
+      else payload.mode = currentMode;
 
-      let tempAssistantId: number | null = null;
-
-      /* ---------------------------------------------------------
-         Show user message immediately (local optimistic update)
-      --------------------------------------------------------- */
+      /* Optimistic user message */
       if (activeConv) {
-        const userLocalMsg: Message = {
+        const optimisticUser: Message = {
           id: Date.now(),
-          role: "user",
           conversation_id: activeConv.id,
+          role: "user",
           content: text,
           score: null,
           is_training: currentMode === "train",
@@ -192,21 +177,18 @@ export default function ChatPage() {
 
         setActiveConv({
           ...activeConv,
-          messages: [...activeConv.messages, userLocalMsg],
+          messages: [...activeConv.messages, optimisticUser],
         });
       }
 
-      /* ---------------------------------------------------------
-         STREAMING MODE
-      --------------------------------------------------------- */
+      /* Streaming API */
       await chatApi.sendMessageStream(payload, {
         onStart: (info) => {
-          tempAssistantId = info.assistant_message_id;
+          setStreamingMsgId(info.assistant_message_id);
 
           if (!activeConv) {
-            // new conversation created
+            // new conversation
             setActiveId(info.conversation_id);
-
             (async () => {
               await refreshConversations();
               await loadConversation(info.conversation_id);
@@ -214,14 +196,13 @@ export default function ChatPage() {
             return;
           }
 
-          // Append placeholder assistant bubble for streaming
           const placeholder: Message = {
             id: info.assistant_message_id,
-            role: "assistant",
             conversation_id: activeConv.id!,
-            content: "", // empty => ChatBubble shows typing indicator
-            is_training: currentMode === "train",
+            role: "assistant",
+            content: "",
             score: null,
+            is_training: currentMode === "train",
             meta: null,
             rated_at: null,
           };
@@ -234,31 +215,34 @@ export default function ChatPage() {
         },
 
         onChunk: (chunk) => {
-          // Update assistant placeholder message
           setActiveConv((prev) => {
             if (!prev) return prev;
 
-            const msgs = prev.messages.map((m) =>
-              m.id === tempAssistantId
-                ? { ...m, content: (m.content || "") + chunk }
-                : m,
-            );
-
-            return { ...prev, messages: msgs };
+            return {
+              ...prev,
+              messages: prev.messages.map((m) =>
+                m.id === streamingMsgId
+                  ? { ...m, content: (m.content || "") + chunk }
+                  : m,
+              ),
+            };
           });
         },
 
         onDone: (final) => {
+          setStreamingMsgId(null);
+
           setActiveConv((prev) => {
             if (!prev) return prev;
 
-            const msgs = prev.messages.map((m) =>
-              m.id === final.assistant_message_id
-                ? { ...m, content: final.answer, score: final.score ?? null }
-                : m,
-            );
-
-            return { ...prev, messages: msgs };
+            return {
+              ...prev,
+              messages: prev.messages.map((m) =>
+                m.id === final.assistant_message_id
+                  ? { ...m, content: final.answer, score: final.score ?? null }
+                  : m,
+              ),
+            };
           });
 
           setConversations((prev) =>
@@ -277,74 +261,53 @@ export default function ChatPage() {
     }
   }
 
-  /* ------------------------------------------------------------------ */
-  async function handleRate(message: Message, score: number) {
-    try {
-      const res = await chatApi.rateMessage(message.id, { score });
-      const updated = res.message;
+  /* ---------------------------------------------- */
+  function handleRate(message: Message, score: number) {
+    chatApi
+      .rateMessage(message.id, { score })
+      .then((res) => {
+        const updated = res.message;
 
-      if (!activeConv) return;
+        if (!activeConv) return;
 
-      setActiveConv({
-        ...activeConv,
-        messages: activeConv.messages.map((m) =>
-          m.id === updated.id ? { ...m, ...updated } : m,
-        ),
-      });
-    } catch (e: any) {
-      alert(e.message ?? "Failed to rate.");
-    }
+        setActiveConv({
+          ...activeConv,
+          messages: activeConv.messages.map((m) =>
+            m.id === updated.id ? { ...m, ...updated } : m,
+          ),
+        });
+      })
+      .catch((e) => alert(e.message ?? "Failed to rate."));
   }
 
+  /* ---------------------------------------------- */
   function handleScroll(e: React.UIEvent<HTMLDivElement>) {
     const el = e.currentTarget;
-    const isBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 80;
-    setAutoScroll(isBottom);
+    const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 80;
+    setAutoScroll(nearBottom);
   }
 
-  useEffect(() => {
-    if (!autoScroll) return;
-
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [activeConv?.messages]);
-
-  /* ------------------------------------------------------------------ */
   const showEmptyState = !activeConv && !loadingMessages;
 
-  /* ------------------------------------------------------------------ */
-  /* RENDER UI */
-  /* ------------------------------------------------------------------ */
+  /* ---------------------------------------------- */
+  /* RENDER                                          */
+  /* ---------------------------------------------- */
   return (
-    <div
-      className="grid grid-cols-1 md:grid-cols-[260px,minmax(0,1fr)]
-                 h-[calc(100vh-4rem)] border rounded-xl overflow-hidden bg-card"
-    >
-      {/* LEFT SIDE — Conversation List */}
+    <div className="grid grid-cols-1 md:grid-cols-[260px,minmax(0,1fr)] h-[calc(100vh-4rem)] border rounded-xl overflow-hidden bg-card">
+      {/* LEFT */}
       <div className="hidden md:block">
         <ConversationList
           conversations={conversations}
           activeId={activeId}
-          onSelect={setActiveId}
+          onSelect={(id) => setActiveId(id)}
           onDelete={handleDeleteConversation}
           onNewChat={handleNewChat}
         />
       </div>
 
-      {/* RIGHT SIDE — Chat Area */}
+      {/* RIGHT */}
       <div className="flex flex-col h-full">
-        {/* Mobile Header */}
-        <div className="md:hidden flex items-center justify-between px-3 py-2 border-b">
-          <button
-            onClick={handleNewChat}
-            className="inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs hover:bg-accent"
-          >
-            New Chat
-          </button>
-
-          <ModeToggle mode={currentMode} onChange={handleModeChange} />
-        </div>
-
-        {/* Desktop Header */}
+        {/* HEADER */}
         <div className="hidden md:flex items-center justify-between px-4 py-3 border-b">
           <div className="flex flex-col">
             <h1 className="text-sm font-semibold">
@@ -352,11 +315,10 @@ export default function ChatPage() {
             </h1>
             <p className="text-xs text-muted-foreground">
               {currentMode === "train"
-                ? "Train Mode: Rate good answers to improve the knowledge base."
-                : "Test Mode: Ask questions without updating the knowledge base."}
+                ? "Train Mode: Rate answers to improve knowledge."
+                : "Test Mode: Ask freely without saving to knowledge."}
             </p>
           </div>
-
           <ModeToggle mode={currentMode} onChange={handleModeChange} />
         </div>
 
@@ -365,20 +327,16 @@ export default function ChatPage() {
           className="flex-1 overflow-y-auto px-4 py-3"
           onScroll={handleScroll}
         >
-          {error && <div className="mb-2 text-xs text-red-500">{error}</div>}
+          {error && <div className="text-xs text-red-500 mb-2">{error}</div>}
 
           {loadingMessages && (
             <p className="text-xs text-muted-foreground">Loading messages…</p>
           )}
 
           {showEmptyState && (
-            <div className="h-full flex flex-col items-center justify-center text-center text-sm text-muted-foreground px-6">
-              <p className="font-medium mb-1">
-                Start a conversation with DtD-AI ✨
-              </p>
-              <p className="text-xs">
-                Ask anything or switch to Train Mode to improve knowledge.
-              </p>
+            <div className="h-full flex flex-col items-center justify-center text-center text-sm text-muted-foreground">
+              <p className="font-medium mb-1">Start a conversation ✨</p>
+              <p className="text-xs">Ask anything or switch to Train Mode.</p>
             </div>
           )}
 
@@ -401,12 +359,11 @@ export default function ChatPage() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* CHAT INPUT */}
+        {/* INPUT */}
         <div className="px-4 py-3 border-t">
           <ChatInput disabled={sending} onSend={handleSend} />
-
           {sending && (
-            <p className="mt-1 text-[11px] text-muted-foreground">
+            <p className="text-[11px] text-muted-foreground mt-1">
               Waiting for AI response…
             </p>
           )}
