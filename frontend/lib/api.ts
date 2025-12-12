@@ -1,4 +1,6 @@
-// lib/api.ts
+const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "";
+const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "";
+
 export type Conversation = {
   id: number;
   title: string;
@@ -78,7 +80,7 @@ export const chatApi = {
   }): Promise<SendMessageResponse> {
     const res = await fetch(`${BASE}/chat/message`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-API-KEY": API_KEY },
       body: JSON.stringify(payload),
     });
     return handleJsonResponse(res);
