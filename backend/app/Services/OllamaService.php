@@ -16,11 +16,11 @@ class OllamaService
     }
 
     /* ---------------------------------------------------------
-     * Regular non-stream generation
+     * NON-STREAMING GENERATION
      * --------------------------------------------------------- */
     public function generate(string $prompt): string
     {
-        $res = Http::timeout(60)->post($this->host . "/api/generate", [
+        $res = Http::timeout(60)->post("{$this->host}/api/generate", [
             "model" => $this->model,
             "prompt" => $prompt,
             "stream" => false,
@@ -38,61 +38,67 @@ class OllamaService
     }
 
     /* ---------------------------------------------------------
-     * STREAMING GENERATION
-     *   $callback receives each partial text chunk
+     * STREAM GENERATION (NDJSON)
+     * $callback receives partial tokens: fn(string $chunk) {}
      * --------------------------------------------------------- */
     public function streamGenerate(string $prompt, callable $callback): void
     {
-        $url = $this->host . "/api/generate";
-
-        // Use Streamed HTTP client
-        $response = Http::withHeaders([
-            "Accept" => "application/json",
-        ])
-            ->timeout(0) // allow streaming
+        $response = Http::withHeaders(["Accept" => "application/json"])
+            ->timeout(0)
             ->withOptions(["stream" => true])
-            ->post($url, [
+            ->post("{$this->host}/api/generate", [
                 "model" => $this->model,
                 "prompt" => $prompt,
                 "stream" => true,
             ]);
 
         if ($response->failed()) {
-            \Log::error("Ollama streamGenerate() failed", [
+            \Log::error("Ollama streamGenerate() HTTP failed", [
                 "status" => $response->status(),
                 "body" => $response->body(),
             ]);
             return;
         }
 
-        /** @var \GuzzleHttp\Psr7\Stream $body */
-        $body = $response->toPsrResponse()->getBody();
+        $stream = $response->toPsrResponse()->getBody();
+        $buffer = "";
 
-        while (!$body->eof()) {
-            $line = trim($body->read(4096));
-            if (!$line) {
+        while (!$stream->eof()) {
+            $chunk = $stream->read(1024);
+
+            if ($chunk === "" || $chunk === false) {
                 usleep(10_000);
                 continue;
             }
 
-            // handle NDJSON streaming lines
-            $parts = explode("\n", $line);
-            foreach ($parts as $jsonLine) {
-                $jsonLine = trim($jsonLine);
-                if (!$jsonLine) {
+            $buffer .= $chunk;
+
+            // NDJSON จะแบ่งด้วย newline
+            $lines = explode("\n", $buffer);
+            $buffer = array_pop($lines); // เก็บ remainder เอาไว้ยังไม่สมบูรณ์
+
+            foreach ($lines as $line) {
+                $line = trim($line);
+                if ($line === "") {
                     continue;
                 }
 
-                $data = json_decode($jsonLine, true);
-                if (!is_array($data)) {
+                $json = json_decode($line, true);
+
+                if (!is_array($json)) {
+                    \Log::warning("Invalid JSON in stream chunk: " . $line);
                     continue;
                 }
 
-                if (isset($data["response"]) && !$data["done"]) {
-                    $callback($data["response"]);
+                // Ollama ส่ง {"response":"...", "done":false}
+                if (
+                    isset($json["response"]) &&
+                    ($json["done"] ?? false) === false
+                ) {
+                    $callback($json["response"]);
                 }
 
-                if (($data["done"] ?? false) === true) {
+                if (($json["done"] ?? false) === true) {
                     return;
                 }
             }
@@ -100,11 +106,11 @@ class OllamaService
     }
 
     /* ---------------------------------------------------------
-     * Embedding request for RAG
+     * EMBEDDINGS
      * --------------------------------------------------------- */
     public function getEmbedding(string $text): array
     {
-        $res = Http::timeout(60)->post($this->host . "/api/embeddings", [
+        $res = Http::timeout(60)->post("{$this->host}/api/embeddings", [
             "model" => $this->model,
             "prompt" => $text,
         ]);

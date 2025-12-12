@@ -32,7 +32,9 @@ class ChatController extends Controller
         $this->kb = $kb;
     }
 
-    /* Conversation CRUD (same as before) */
+    /* ============================================================
+     *  CRUD
+     * ============================================================ */
     public function index()
     {
         return Conversation::withCount("messages")
@@ -55,9 +57,7 @@ class ChatController extends Controller
     public function showConversation(Conversation $conversation)
     {
         $conversation->load([
-            "messages" => function ($q) {
-                $q->orderBy("created_at");
-            },
+            "messages" => fn($q) => $q->orderBy("created_at"),
         ]);
 
         return $conversation;
@@ -73,7 +73,6 @@ class ChatController extends Controller
         $conversation->update([
             "title" => $req->title,
             "is_title_generated" => true,
-            // optional mode on conversation
             "mode" => $req->mode ?? $conversation->mode,
         ]);
 
@@ -87,13 +86,13 @@ class ChatController extends Controller
         return response()->json(["status" => "deleted"]);
     }
 
-    /* ---------------------------------------------------------
-     *  MAIN CHAT ENDPOINT (non-streaming)
-     *  POST /api/chat/message
-     * --------------------------------------------------------- */
+    /* ============================================================
+     *  NON-STREAMING ENDPOINT
+     * ============================================================ */
     public function message(Request $req)
     {
         \Log::info("Hit ChatController@message");
+
         $validator = \Validator::make($req->all(), [
             "conversation_id" => "nullable|integer|exists:conversations,id",
             "message" => "required|string",
@@ -114,9 +113,7 @@ class ChatController extends Controller
             $mode = $req->mode ?? "test";
             $question = $req->message;
 
-            // create conversation if missing
-            $conversationId = $req->conversation_id;
-            if (!$conversationId) {
+            if (!$req->conversation_id) {
                 $conversation = Conversation::create([
                     "title" => "",
                     "is_title_generated" => false,
@@ -124,10 +121,10 @@ class ChatController extends Controller
                 ]);
                 $conversationId = $conversation->id;
             } else {
+                $conversationId = $req->conversation_id;
                 $conversation = Conversation::find($conversationId);
             }
 
-            // Save user message first (needed for title gen)
             $userMsg = Message::create([
                 "conversation_id" => $conversationId,
                 "role" => "user",
@@ -135,23 +132,19 @@ class ChatController extends Controller
                 "is_training" => $mode === "train",
             ]);
 
-            // Search KB
             $contexts = $this->query->searchKB($question, 4);
-
-            // Build prompt and call LLM
             $prompt = $this->buildRagPrompt($question, $contexts);
+
             $answer = $this->llm->generate($prompt);
             if (!is_string($answer) || trim($answer) === "") {
                 $answer = "I’m sorry, I cannot answer right now.";
             }
 
-            // Score if train mode
             $score = null;
             if ($mode === "train") {
                 $score = $this->scorer->evaluate($question, $answer);
             }
 
-            // Save assistant message
             $assistantMsg = Message::create([
                 "conversation_id" => $conversationId,
                 "role" => "assistant",
@@ -165,12 +158,10 @@ class ChatController extends Controller
                 ],
             ]);
 
-            // Auto add to KB if train + good score
             if ($mode === "train" && $score >= 4) {
                 $this->kb->storeText($answer, ["auto_train"]);
             }
 
-            // Dispatch title generator and summary generator
             GenerateConversationTitleJob::dispatch($conversationId);
             GenerateConversationSummaryJob::dispatch($conversationId);
 
@@ -195,14 +186,13 @@ class ChatController extends Controller
         }
     }
 
-    /* ---------------------------------------------------------
-     *  Streaming endpoint (chunked streaming via Fetch readable stream)
-     *  POST /api/chat/message/stream
-     *  Body: { conversation_id?, message, mode? }
-     * --------------------------------------------------------- */
+    /* ============================================================
+     *  STREAMING (NDJSON)
+     * ============================================================ */
     public function messageStream(Request $req)
     {
         \Log::info("Hit ChatController@messageStream");
+
         $validator = \Validator::make($req->all(), [
             "conversation_id" => "nullable|integer|exists:conversations,id",
             "message" => "required|string",
@@ -219,12 +209,12 @@ class ChatController extends Controller
             );
         }
 
-        // We'll stream raw text chunks to client using chunked response
         try {
             $mode = $req->mode ?? "test";
             $question = $req->message;
-            $conversationId = $req->conversation_id;
-            if (!$conversationId) {
+
+            // Create conversation if not exists
+            if (!$req->conversation_id) {
                 $conversation = Conversation::create([
                     "title" => "",
                     "is_title_generated" => false,
@@ -232,10 +222,11 @@ class ChatController extends Controller
                 ]);
                 $conversationId = $conversation->id;
             } else {
+                $conversationId = $req->conversation_id;
                 $conversation = Conversation::find($conversationId);
             }
 
-            // save user message
+            // Save user message
             $userMsg = Message::create([
                 "conversation_id" => $conversationId,
                 "role" => "user",
@@ -243,68 +234,80 @@ class ChatController extends Controller
                 "is_training" => $mode === "train",
             ]);
 
-            // search KB
+            // KB search
             $contexts = $this->query->searchKB($question, 4);
             $prompt = $this->buildRagPrompt($question, $contexts);
 
-            // create assistant DB row first with empty content so we can update as chunks come
+            // Create assistant message
             $assistantMsg = Message::create([
                 "conversation_id" => $conversationId,
                 "role" => "assistant",
                 "content" => "",
-                "score" => null,
                 "is_training" => $mode === "train",
+                "score" => null,
                 "meta" => [
                     "question" => $question,
                     "rag_context" => $contexts,
                 ],
             ]);
 
-            // Prepare stream response
-            // We'll send newline-delimited JSON chunks for the client to parse
             return response()->stream(
                 function () use (
                     $prompt,
-                    $conversationId,
                     $assistantMsg,
+                    $conversationId,
+                    $userMsg,
                     $mode,
                     $question,
                     $contexts,
                 ) {
-                    // The OllamaService->streamGenerate should yield pieces (or accept a callback)
-                    // Here assume it accepts a closure that will be called with each chunk.
+                    /* -------------------------------------------------------
+                     * 1) Send START event so UI can create bubbles
+                     * ------------------------------------------------------- */
+                    echo json_encode([
+                        "type" => "start",
+                        "conversation_id" => $conversationId,
+                        "user_message_id" => $userMsg->id,
+                        "assistant_message_id" => $assistantMsg->id,
+                    ]) . "\n";
+                    @ob_flush();
+                    @flush();
+
                     $accum = "";
+
+                    /* -------------------------------------------------------
+                     * 2) STREAM CHUNKS FROM OLLAMA
+                     * ------------------------------------------------------- */
                     $this->llm->streamGenerate($prompt, function ($chunk) use (
                         &$accum,
                         $assistantMsg,
                         $conversationId,
                     ) {
-                        // append to DB incrementally (optional: throttle updates)
                         $accum .= $chunk;
-                        // update assistant message with partial content (non-blocking)
+
+                        // Update DB
                         try {
                             $assistantMsg->content = $accum;
                             $assistantMsg->saveQuietly();
                         } catch (\Throwable $e) {
-                            // ignore DB errors on incremental updates
                         }
 
-                        // send chunk to client as JSON line
-                        $payload = json_encode([
+                        echo json_encode([
                             "type" => "chunk",
                             "conversation_id" => $conversationId,
                             "assistant_message_id" => $assistantMsg->id,
                             "chunk" => $chunk,
-                        ]);
-                        echo $payload . "\n";
-                        // flush to client
+                        ]) . "\n";
                         @ob_flush();
                         @flush();
                     });
 
-                    // after streaming finished, compute final answer and optionally score & KB save
+                    /* -------------------------------------------------------
+                     * 3) DONE event
+                     * ------------------------------------------------------- */
                     $finalAnswer = $assistantMsg->fresh()->content ?? "";
                     $score = null;
+
                     if ($mode === "train") {
                         $score = $this->scorer->evaluate(
                             $question,
@@ -318,19 +321,16 @@ class ChatController extends Controller
                         }
                     }
 
-                    // dispatch jobs
                     GenerateConversationTitleJob::dispatch($conversationId);
                     GenerateConversationSummaryJob::dispatch($conversationId);
 
-                    // final payload
-                    $final = json_encode([
+                    echo json_encode([
                         "type" => "done",
                         "conversation_id" => $conversationId,
                         "assistant_message_id" => $assistantMsg->id,
                         "answer" => $finalAnswer,
                         "score" => $score,
-                    ]);
-                    echo $final . "\n";
+                    ]) . "\n";
                     @ob_flush();
                     @flush();
                 },
@@ -338,7 +338,7 @@ class ChatController extends Controller
                 [
                     "Content-Type" => "application/x-ndjson",
                     "Cache-Control" => "no-cache",
-                    "X-Accel-Buffering" => "no", // for nginx buffering
+                    "X-Accel-Buffering" => "no",
                 ],
             );
         } catch (\Throwable $e) {
@@ -353,23 +353,23 @@ class ChatController extends Controller
         }
     }
 
-    /* ---------------------------------------------------------
-     *  Conversation summarization endpoint (manual trigger)
-     *  POST /api/chat/conversations/{conversation}/summarize
-     * --------------------------------------------------------- */
+    /* ============================================================
+     *  CONVERSATION SUMMARY
+     * ============================================================ */
     public function summarizeConversation(Conversation $conversation)
     {
         GenerateConversationSummaryJob::dispatch($conversation->id);
         return response()->json(["status" => "queued"]);
     }
 
-    /* ---------------------------------------------------------
-     *  RAG PROMPT BUILDER
-     * --------------------------------------------------------- */
+    /* ============================================================
+     *  RAG PROMPT
+     * ============================================================ */
     protected function buildRagPrompt(string $query, array $contexts): string
     {
         $header =
             "You are an AI assistant that answers ONLY using the information in the Knowledge Base.\n\n";
+
         if (count($contexts) === 0) {
             $header .= "[NO CONTEXT]\n\n";
         } else {

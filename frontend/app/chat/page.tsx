@@ -33,6 +33,8 @@ export default function ChatPage() {
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
+  const [autoScroll, setAutoScroll] = useState(true);
+
   /* ------------------------------------------------------------------ */
   /* Load Conversations List */
   /* ------------------------------------------------------------------ */
@@ -51,8 +53,17 @@ export default function ChatPage() {
 
   /* Auto scroll to bottom */
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [activeConv?.messages?.length]);
+    const lastMsg = activeConv?.messages?.[activeConv.messages.length - 1];
+
+    if (!lastMsg) return;
+
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "end",
+      });
+    }
+  }, [activeConv?.messages]);
 
   /* Determine active mode (test or train) */
   const currentMode: Mode = useMemo(() => {
@@ -285,6 +296,18 @@ export default function ChatPage() {
     }
   }
 
+  function handleScroll(e: React.UIEvent<HTMLDivElement>) {
+    const el = e.currentTarget;
+    const isBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 80;
+    setAutoScroll(isBottom);
+  }
+
+  useEffect(() => {
+    if (!autoScroll) return;
+
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [activeConv?.messages]);
+
   /* ------------------------------------------------------------------ */
   const showEmptyState = !activeConv && !loadingMessages;
 
@@ -338,7 +361,7 @@ export default function ChatPage() {
         </div>
 
         {/* MESSAGES */}
-        <div className="flex-1 overflow-y-auto px-4 py-3">
+        <div className="flex-1 overflow-y-auto px-4 py-3" onScroll={handleScroll}>
           {error && <div className="mb-2 text-xs text-red-500">{error}</div>}
 
           {loadingMessages && (
@@ -357,7 +380,7 @@ export default function ChatPage() {
           )}
 
           {activeConv?.messages?.map((m) => (
-            <ChatBubble key={m.id} message={m}>
+            <ChatBubble message={m} isStreaming={m.id === streamingMsgId} />
               {m.role === "assistant" && currentMode === "train" && (
                 <RatingStars
                   initialScore={m.score}

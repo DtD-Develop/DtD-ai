@@ -7,13 +7,15 @@ type Props = {
     role: "user" | "assistant";
     content: string;
   };
+  isStreaming?: boolean;
   children?: React.ReactNode; // rating stars, etc.
 };
 
 export function ChatBubble({ message, children }: Props) {
   const isAssistant = message.role === "assistant";
   const isLoading =
-    isAssistant && (!message.content || message.content.trim() === "");
+    isAssistant &&
+    (isStreaming || !message.content || message.content.trim() === "");
 
   return (
     <div

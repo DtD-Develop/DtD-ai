@@ -106,83 +106,97 @@ export const chatApi = {
    *
    * Backend returns newline-delimited JSON lines (NDJSON): each line is a JSON object with type chunk/done
    */
-  async sendMessageStream(
-    payload: {
-      conversation_id?: number;
-      message: string;
-      mode?: "test" | "train";
-    },
-    callbacks: {
-      onStart?: (info: {
-        conversation_id: number;
-        assistant_message_id: number;
-        user_message_id?: number;
-      }) => void;
-      onChunk?: (chunk: string) => void;
-      onDone?: (final: {
-        conversation_id: number;
-        assistant_message_id: number;
-        answer: string;
-        score?: number | null;
-      }) => void;
-    },
-  ): Promise<void> {
-    // stream ต้องใช้ fetch ตรง ๆ เพื่อเข้าถึง res.body, แต่ยังคงแนบ X-API-KEY เหมือนเดิม
-    const res = await fetch(`${BASE_URL}/api/chat/message/stream`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-KEY": API_KEY,
-      },
-      body: JSON.stringify(payload),
-    });
+   async sendMessageStream(
+     payload: {
+       conversation_id?: number;
+       message: string;
+       mode?: "test" | "train";
+     },
+     callbacks: {
+       onStart?: (info: {
+         conversation_id: number;
+         assistant_message_id: number;
+         user_message_id?: number;
+       }) => void;
+       onChunk?: (chunk: string) => void;
+       onDone?: (final: {
+         conversation_id: number;
+         assistant_message_id: number;
+         answer: string;
+         score?: number | null;
+       }) => void;
+     }
+   ): Promise<void> {
+     const res = await fetch(`${BASE_URL}/api/chat/message/stream`, {
+       method: "POST",
+       headers: {
+         "Content-Type": "application/json",
+         "X-API-KEY": API_KEY,
+       },
+       body: JSON.stringify(payload),
+     });
 
-    if (!res.ok || !res.body) {
-      const text = await res.text();
-      throw new Error(text || `HTTP ${res.status}`);
-    }
+     if (!res.ok || !res.body) {
+       const text = await res.text();
+       throw new Error(text || `HTTP ${res.status}`);
+     }
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
+     const reader = res.body.getReader();
+     const decoder = new TextDecoder();
+     let buffer = "";
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
+     while (true) {
+       const { done, value } = await reader.read();
+       if (done) break;
 
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          const payload = JSON.parse(trimmed);
-          if (payload.type === "chunk") {
-            if (callbacks.onStart) {
-              callbacks.onStart({
-                conversation_id: payload.conversation_id,
-                assistant_message_id: payload.assistant_message_id,
-                user_message_id: payload.user_message_id,
-              });
-              callbacks.onStart = undefined;
-            }
-            if (callbacks.onChunk) callbacks.onChunk(payload.chunk);
-          } else if (payload.type === "done") {
-            if (callbacks.onDone)
-              callbacks.onDone({
-                conversation_id: payload.conversation_id,
-                assistant_message_id: payload.assistant_message_id,
-                answer: payload.answer,
-                score: payload.score ?? null,
-              });
-          }
-        } catch (err) {
-          console.warn("Failed parse stream line", err, trimmed);
-        }
-      }
-    }
-  },
+       buffer += decoder.decode(value, { stream: true });
+
+       const lines = buffer.split("\n");
+       buffer = lines.pop() ?? "";
+
+       for (const line of lines) {
+         const trimmed = line.trim();
+         if (!trimmed) continue;
+
+         let json: any;
+         try {
+           json = JSON.parse(trimmed);
+         } catch (e) {
+           console.warn("Invalid JSON from stream:", trimmed);
+           continue;
+         }
+
+         const event = json.event;
+
+         // START EVENT
+         if (event === "start") {
+           callbacks.onStart?.({
+             conversation_id: json.conversation_id,
+             assistant_message_id: json.assistant_message_id,
+             user_message_id: json.user_message_id,
+           });
+           continue;
+         }
+
+         // STREAM CHUNK
+         if (event === "chunk") {
+           callbacks.onChunk?.(json.chunk);
+           continue;
+         }
+
+         // DONE EVENT
+         if (event === "done") {
+           callbacks.onDone?.({
+             conversation_id: json.conversation_id,
+             assistant_message_id: json.assistant_message_id,
+             answer: json.answer,
+             score: json.score ?? null,
+           });
+           continue;
+         }
+       }
+     }
+   }
 
   async rateMessage(
     messageId: number,
