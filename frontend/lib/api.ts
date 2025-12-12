@@ -184,12 +184,19 @@ export const chatApi = {
     }
   },
 
-  async rateMessage(messageId: number, payload: { score: number }) {
-    return ChatFetch(`/api/chat/messages/${messageId}/rate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+  async rateMessage(
+    messageId: number,
+    payload: { score: number },
+  ): Promise<{ message: Message }> {
+    const res = await ChatFetch<{ message: Message }>(
+      `/api/chat/messages/${messageId}/rate`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    );
+    return res;
   },
 
   async summarizeConversation(conversationId: number) {
