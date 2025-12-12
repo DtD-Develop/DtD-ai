@@ -82,46 +82,37 @@ class ChatController extends Controller
 
     public function message(Request $req)
     {
-        \Log::info("Hit ChatController@message", [
-            "path" => $req->path(),
-            "headers" => $req->headers->all(),
-        ]);
-
         $req->validate([
             "conversation_id" => "required|integer|exists:conversations,id",
             "message" => "required|string",
             "mode" => "nullable|in:test,train",
         ]);
 
-        // $question = $req->message;
+        $question = $req->message;
 
-        // /* 1) SEARCH KNOWLEDGE BASE */
-        // $contexts = $this->query->searchKB($question, 4);
+        /* 1) SEARCH KNOWLEDGE BASE */
+        $contexts = $this->query->searchKB($question, 4);
 
-        // /* 2) BUILD RAG PROMPT (English) */
-        // $prompt = $this->buildRagPrompt($question, $contexts);
+        /* 2) BUILD RAG PROMPT (English) */
+        $prompt = $this->buildRagPrompt($question, $contexts);
 
-        // /* 3) GENERATE ANSWER FROM LLM */
-        // $answer = $this->llm->generate($prompt);
+        /* 3) GENERATE ANSWER FROM LLM */
+        $answer = $this->llm->generate($prompt);
 
-        // /* 4) SAVE MESSAGE HISTORY */
-        // $msg = Message::create([
-        //     "conversation_id" => $req->conversation_id,
-        //     "question" => $question,
-        //     "answer" => $answer,
-        //     "mode" => $req->mode ?? "test",
-        //     "rag_context" => json_encode($contexts),
-        // ]);
+        /* 4) SAVE MESSAGE HISTORY */
+        $msg = Message::create([
+            "conversation_id" => $req->conversation_id,
+            "question" => $question,
+            "answer" => $answer,
+            "mode" => $req->mode ?? "test",
+            "rag_context" => json_encode($contexts),
+        ]);
 
-        // return response()->json([
-        //     "message_id" => $msg->id,
-        //     "answer" => $answer,
-        //     "kb_hits" => $contexts,
-        //     "rag_prompt" => $prompt,
-        // ]);
         return response()->json([
-            "ok" => true,
-            "echo" => $req->all(),
+            "message_id" => $msg->id,
+            "answer" => $answer,
+            "kb_hits" => $contexts,
+            "rag_prompt" => $prompt,
         ]);
     }
 
