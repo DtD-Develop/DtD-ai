@@ -34,24 +34,18 @@ export default function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
-  /* ---------------------------------------------- */
-  /* Load conversation list on mount                */
-  /* ---------------------------------------------- */
+  /* Load conversation list */
   useEffect(() => {
     refreshConversations();
   }, []);
 
-  /* ---------------------------------------------- */
-  /* Load messages when activeId changes            */
-  /* ---------------------------------------------- */
+  /* Load messages when conversation changes */
   useEffect(() => {
     if (activeId != null) loadConversation(activeId);
     else setActiveConv(null);
   }, [activeId]);
 
-  /* ---------------------------------------------- */
-  /* Auto-scroll when new message arrived           */
-  /* ---------------------------------------------- */
+  /* Auto-scroll when new messages come */
   useEffect(() => {
     if (!activeConv?.messages) return;
     if (!autoScroll) return;
@@ -59,15 +53,13 @@ export default function ChatPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [activeConv?.messages]);
 
-  /* ---------------------------------------------- */
-  /* Calculate current mode                         */
-  /* ---------------------------------------------- */
+  /* Determine chat mode */
   const currentMode: Mode = useMemo(() => {
     if (activeConv) return activeConv.mode;
     return pendingMode;
   }, [activeConv, pendingMode]);
 
-  /* ---------------------------------------------- */
+  /* Load conversation list */
   async function refreshConversations() {
     setLoadingConvs(true);
     setError(null);
@@ -83,6 +75,7 @@ export default function ChatPage() {
     }
   }
 
+  /* Load messages for selected conversation */
   async function loadConversation(id: number) {
     setError(null);
     setLoadingMessages(true);
@@ -96,19 +89,20 @@ export default function ChatPage() {
     }
   }
 
-  /* ---------------------------------------------- */
+  /* New conversation */
   function handleNewChat() {
     setActiveId(null);
     setActiveConv(null);
     setPendingMode("test");
   }
 
-  /* ---------------------------------------------- */
+  /* Delete conversation */
   async function handleDeleteConversation(id: number) {
     if (!confirm("Delete this conversation?")) return;
 
     try {
       await chatApi.deleteConversation(id);
+
       const next = conversations.filter((c) => c.id !== id);
       setConversations(next);
 
@@ -121,7 +115,7 @@ export default function ChatPage() {
     }
   }
 
-  /* ---------------------------------------------- */
+  /* Change conversation mode */
   async function handleModeChange(newMode: Mode) {
     if (!activeConv) {
       setPendingMode(newMode);
@@ -144,15 +138,15 @@ export default function ChatPage() {
     }
   }
 
-  /* ---------------------------------------------- */
-  /* SEND MESSAGE WITH STREAMING                    */
-  /* ---------------------------------------------- */
+  /* SEND MESSAGE (Streaming) */
   async function handleSend(text: string) {
     setSending(true);
     setError(null);
     setStreamingMsgId(null);
 
     try {
+      let localAssistantId: number | null = null; // ⭐ FIX KEY BUG
+
       const payload: {
         conversation_id?: number;
         message: string;
@@ -162,7 +156,7 @@ export default function ChatPage() {
       if (activeConv?.id) payload.conversation_id = activeConv.id;
       else payload.mode = currentMode;
 
-      /* Optimistic user message */
+      /* Optimistic user bubble */
       if (activeConv) {
         const optimisticUser: Message = {
           id: Date.now(),
@@ -181,13 +175,13 @@ export default function ChatPage() {
         });
       }
 
-      /* Streaming API */
+      /* Stream from backend */
       await chatApi.sendMessageStream(payload, {
         onStart: (info) => {
+          localAssistantId = info.assistant_message_id;
           setStreamingMsgId(info.assistant_message_id);
 
           if (!activeConv) {
-            // new conversation
             setActiveId(info.conversation_id);
             (async () => {
               await refreshConversations();
@@ -209,7 +203,10 @@ export default function ChatPage() {
 
           setActiveConv((prev) =>
             prev
-              ? { ...prev, messages: [...prev.messages, placeholder] }
+              ? {
+                  ...prev,
+                  messages: [...prev.messages, placeholder],
+                }
               : prev,
           );
         },
@@ -221,7 +218,7 @@ export default function ChatPage() {
             return {
               ...prev,
               messages: prev.messages.map((m) =>
-                m.id === streamingMsgId
+                m.id === localAssistantId
                   ? { ...m, content: (m.content || "") + chunk }
                   : m,
               ),
@@ -239,7 +236,11 @@ export default function ChatPage() {
               ...prev,
               messages: prev.messages.map((m) =>
                 m.id === final.assistant_message_id
-                  ? { ...m, content: final.answer, score: final.score ?? null }
+                  ? {
+                      ...m,
+                      content: final.answer,
+                      score: final.score ?? null,
+                    }
                   : m,
               ),
             };
@@ -261,7 +262,7 @@ export default function ChatPage() {
     }
   }
 
-  /* ---------------------------------------------- */
+  /* Rating stars */
   function handleRate(message: Message, score: number) {
     chatApi
       .rateMessage(message.id, { score })
@@ -280,7 +281,7 @@ export default function ChatPage() {
       .catch((e) => alert(e.message ?? "Failed to rate."));
   }
 
-  /* ---------------------------------------------- */
+  /* scroll tracking */
   function handleScroll(e: React.UIEvent<HTMLDivElement>) {
     const el = e.currentTarget;
     const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 80;
@@ -289,9 +290,6 @@ export default function ChatPage() {
 
   const showEmptyState = !activeConv && !loadingMessages;
 
-  /* ---------------------------------------------- */
-  /* RENDER                                          */
-  /* ---------------------------------------------- */
   return (
     <div className="grid grid-cols-1 md:grid-cols-[260px,minmax(0,1fr)] h-[calc(100vh-4rem)] border rounded-xl overflow-hidden bg-card">
       {/* LEFT */}
@@ -299,7 +297,7 @@ export default function ChatPage() {
         <ConversationList
           conversations={conversations}
           activeId={activeId}
-          onSelect={(id) => setActiveId(id)}
+          onSelect={setActiveId}
           onDelete={handleDeleteConversation}
           onNewChat={handleNewChat}
         />
@@ -309,7 +307,7 @@ export default function ChatPage() {
       <div className="flex flex-col h-full">
         {/* HEADER */}
         <div className="hidden md:flex items-center justify-between px-4 py-3 border-b">
-          <div className="flex flex-col">
+          <div>
             <h1 className="text-sm font-semibold">
               {activeConv?.title || "New Chat"}
             </h1>
