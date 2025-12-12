@@ -82,11 +82,8 @@ class ChatController extends Controller
 
     public function message(Request $req)
     {
-        \Log::info("Hit ChatController@message", [
-            "path" => $req->path(),
-        ]);
+        \Log::info("Hit ChatController@message", ["path" => $req->path()]);
 
-        // 1) Manual validation for API (no redirect)
         $validator = \Validator::make($req->all(), [
             "conversation_id" => "required|integer|exists:conversations,id",
             "message" => "required|string",
@@ -94,62 +91,63 @@ class ChatController extends Controller
         ]);
 
         if ($validator->fails()) {
-            \Log::warning("ChatController@message validation failed", [
-                "errors" => $validator->errors()->toArray(),
-            ]);
-
-            return response()
-                ->json(
-                    [
-                        "message" => "Validation failed",
-                        "errors" => $validator->errors(),
-                    ],
-                    422,
-                )
-                ->header("X-Debug-Controller", "ChatController-message");
+            return response()->json(
+                [
+                    "message" => "Validation failed",
+                    "errors" => $validator->errors(),
+                ],
+                422,
+            );
         }
 
         try {
             $question = $req->message;
 
+            // ---- SEARCH KB ----
             $contexts = $this->query->searchKB($question, 4);
+
+            // ---- BUILD PROMPT ----
             $prompt = $this->buildRagPrompt($question, $contexts);
+
+            // ---- CALL LLM ----
             $answer = $this->llm->generate($prompt);
 
+            // fallback เมื่อ Ollama ไม่ตอบ
+            if (!is_string($answer) || trim($answer) === "") {
+                \Log::warning("LLM returned no answer, using fallback.");
+                $answer = "I’m sorry, I cannot answer right now.";
+            }
+
+            // ---- SAVE MESSAGE ----
             $msg = Message::create([
                 "conversation_id" => $req->conversation_id,
-                "question" => $question,
-                "answer" => $answer,
+                "question" => $question ?? "",
+                "answer" => $answer ?? "",
                 "mode" => $req->mode ?? "test",
-                "rag_context" => json_encode($contexts),
+                "rag_context" => json_encode($contexts ?? []),
             ]);
 
-            $resp = response()->json([
+            return response()->json([
                 "message_id" => $msg->id,
                 "answer" => $answer,
                 "kb_hits" => $contexts,
                 "rag_prompt" => $prompt,
             ]);
-
-            $resp->headers->set("X-Debug-Controller", "ChatController-message");
-
-            return $resp;
         } catch (\Throwable $e) {
             \Log::error("ChatController@message exception", [
                 "message" => $e->getMessage(),
                 "trace" => $e->getTraceAsString(),
             ]);
 
-            return response()
-                ->json(
-                    [
-                        "message" => "Internal server error",
-                    ],
-                    500,
-                )
-                ->header("X-Debug-Controller", "ChatController-message");
+            return response()->json(
+                [
+                    "message" => "Internal server error",
+                ],
+                500,
+            );
         }
     }
+
     /* ---------------------------------------------------------
      *  Manual Rating Endpoint
      *  POST /chat/messages/{message}/rate
