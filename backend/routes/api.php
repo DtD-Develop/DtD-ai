@@ -3,7 +3,7 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\KbController;
 use App\Http\Controllers\QueryController;
-use App\Http\Controllers\ApiLogController;
+use App\Http\Controllers\Api\ApiLogController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\DashboardController;
 

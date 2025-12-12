@@ -39,7 +39,6 @@ async function apiFetch<T>(
     headers: {
       "Content-Type": "application/json",
       "X-API-KEY": API_KEY,
-      "X-API-TEST": "Test",
       ...(options.headers || {}),
     },
     cache: "no-store",
