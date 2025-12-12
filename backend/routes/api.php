@@ -7,31 +7,11 @@ use App\Http\Controllers\Api\ApiLogController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\DashboardController;
 
-// Route::post("/upload", [UploadController::class, "upload"]);
-// Route::post("/train", [UploadController::class, "train"]);
-// Route::post("/query", [QueryController::class, "query"]);
-
 Route::get("/health", function () {
     return response()->json(["status" => "ok"]);
 });
 
 Route::middleware(["api-key", "api-log"])->group(function () {
-    // Chat & manual train
-    // Route::get("/chat/conversations", [ChatController::class, "list"]);
-    // Route::post("/chat/conversations", [ChatController::class, "create"]);
-    // Route::get("/chat/conversations/{id}", [ChatController::class, "show"]);
-    // Route::delete("/chat/conversations/{id}", [
-    //     ChatController::class,
-    //     "destroy",
-    // ]);
-    // Route::post("/chat/store", [ChatController::class, "storeMessages"]);
-
-    // Route::post("/chat/test", [ChatController::class, "test"]);
-    // Route::post("/chat/teach", [ChatController::class, "teach"]);
-
-    // Route::post("/chat", [ChatController::class, "handle"]);
-    // Route::post("/chat/{id}/rate", [ChatController::class, "rate"]);
-
     // KB upload / manage
     Route::post("/kb/upload", [KbController::class, "upload"]);
     Route::get("/kb/files", [KbController::class, "index"]);
