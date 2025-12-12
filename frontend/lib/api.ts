@@ -79,14 +79,14 @@ export const chatApi = {
     });
   },
 
-  async updateConversation(id: number, payload: any) {
-    return ChatFetch(`/api/chat/conversations/${id}`, {
+  async updateConversation(id: number, payload: any): Promise<Conversation> {
+    const res = await ChatFetch<Conversation>(`/api/chat/conversations/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
+    return res;
   },
-
   async sendMessage(payload: {
     conversation_id?: number;
     message: string;
