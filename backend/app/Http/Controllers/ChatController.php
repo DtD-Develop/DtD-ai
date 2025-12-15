@@ -191,8 +191,8 @@ class ChatController extends Controller
      * POST /chat/messages/{message}/rate
      * body: { score: int }
      */
-     public function rate(Request $req, Message $message)
-     {
+    public function rate(Request $req, Message $message)
+    {
          $validator = \Validator::make($req->all(), [
              'score' => 'required|integer|min:0|max:10',
          ]);
@@ -212,7 +212,7 @@ class ChatController extends Controller
              'score'    => $score,
              'promoted' => false,
          ]);
-     }
+    }
 
 
 
