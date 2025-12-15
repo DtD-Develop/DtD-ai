@@ -81,12 +81,12 @@ class ChatController extends Controller
 
     public function destroyConversation(Conversation $conversation)
     {
-        \Log::info("Destroy conversation", ["id" => $conversation->id]);
+        \Log::info("Destroy conversation", ["id" => $conversation]);
 
         $conversation->messages()->delete();
         $conversation->delete();
 
-        \Log::info("Destroyed conversation done", ["id" => $conversation->id]);
+        \Log::info("Destroyed conversation done", ["id" => $conversation]);
 
         return response()->json(["status" => "deleted"]);
     }
