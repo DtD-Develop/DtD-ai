@@ -79,14 +79,29 @@ class ChatController extends Controller
         return $conversation;
     }
 
-    public function destroyConversation(Conversation $conversation)
+    public function destroyConversation(int $conversationId)
     {
-        \Log::info("Destroy conversation", ["id" => $conversation]);
+        // ลองหา conversation ตาม id ที่มาจาก URL
+        $conversation = Conversation::find($conversationId);
 
+        if (!$conversation) {
+            \Log::warning("Destroy conversation: not found", [
+                "id" => $conversationId,
+            ]);
+
+            return response()->json(
+                ["message" => "Conversation not found"],
+                404,
+            );
+        }
+
+        \Log::info("Destroy conversation", ["id" => $conversation->id]);
+
+        // ลบ messages ทั้งหมดในบทสนทนานี้
         $conversation->messages()->delete();
         $conversation->delete();
 
-        \Log::info("Destroyed conversation done", ["id" => $conversation]);
+        \Log::info("Destroyed conversation done", ["id" => $conversation->id]);
 
         return response()->json(["status" => "deleted"]);
     }
