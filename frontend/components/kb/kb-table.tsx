@@ -73,9 +73,54 @@ export function KbTable({ files, refresh }: any) {
                   </div>
                 </td>
                 <td>
-                  <span className="text-xs bg-blue-500/10 text-blue-500 px-2 py-0.5 rounded">
-                    {file.status}
-                  </span>
+                  {(() => {
+                    const status: string = file.status ?? "unknown";
+                    const base =
+                      "text-xs px-2 py-0.5 rounded inline-flex items-center gap-1";
+
+                    if (status === "ready") {
+                      return (
+                        <span
+                          className={`${base} bg-emerald-500/10 text-emerald-500`}
+                        >
+                          ● <span className="capitalize">{status}</span>
+                        </span>
+                      );
+                    }
+
+                    if (
+                      status === "processing" ||
+                      status === "parsing" ||
+                      status === "embedding"
+                    ) {
+                      return (
+                        <span
+                          className={`${base} bg-blue-500/10 text-blue-500`}
+                        >
+                          ● <span className="capitalize">{status}</span>
+                          {typeof file.progress === "number" && (
+                            <span className="ml-1 text-[10px] opacity-80">
+                              {file.progress}%
+                            </span>
+                          )}
+                        </span>
+                      );
+                    }
+
+                    if (status === "failed") {
+                      return (
+                        <span className={`${base} bg-red-500/10 text-red-500`}>
+                          ● <span className="capitalize">{status}</span>
+                        </span>
+                      );
+                    }
+
+                    return (
+                      <span className={`${base} bg-gray-500/10 text-gray-500`}>
+                        ● <span className="capitalize">{status}</span>
+                      </span>
+                    );
+                  })()}
                 </td>
                 <td className="text-right text-muted-foreground text-xs">
                   {isExpanded ? "Hide" : "View"}
@@ -85,41 +130,76 @@ export function KbTable({ files, refresh }: any) {
               {isExpanded && (
                 <tr className="bg-muted/30">
                   <td colSpan={4} className="p-3">
-                    <div className="space-y-2">
-                      <h4 className="text-xs font-semibold">Chunks</h4>
+                    <div className="space-y-3">
+                      {/* Summary / error / meta */}
+                      <div className="space-y-1 text-xs">
+                        {file.summary && (
+                          <div>
+                            <div className="font-semibold mb-0.5">Summary</div>
 
-                      {loadingChunks && (
-                        <div className="text-xs text-muted-foreground">
-                          Loading chunks...
-                        </div>
-                      )}
+                            <p className="text-muted-foreground whitespace-pre-wrap">
+                              {file.summary}
+                            </p>
+                          </div>
+                        )}
 
-                      {!loadingChunks && chunks.length === 0 && (
-                        <div className="text-xs text-muted-foreground">
-                          No chunks extracted
-                        </div>
-                      )}
+                        {file.error_message && (
+                          <div>
+                            <div className="font-semibold text-red-500 mb-0.5">
+                              Error
+                            </div>
 
-                      {chunks.map((chunk) => (
-                        <div
-                          key={chunk.id}
-                          className="p-2 bg-background border rounded-lg relative group"
-                        >
-                          <pre className="text-xs whitespace-pre-wrap text-foreground">
-                            {chunk.text}
-                          </pre>
+                            <p className="text-red-500/80 whitespace-pre-wrap">
+                              {file.error_message}
+                            </p>
+                          </div>
+                        )}
 
-                          <button
-                            className="absolute top-2 right-2 hidden group-hover:inline-block text-[10px] bg-destructive text-white px-2 py-0.5 rounded"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deleteChunk(file.id, chunk.id);
-                            }}
+                        {typeof file.chunks_count === "number" && (
+                          <div className="text-muted-foreground">
+                            Chunks: {file.chunks_count}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Chunks */}
+                      <div className="space-y-2">
+                        <h4 className="text-xs font-semibold">Chunks</h4>
+
+                        {loadingChunks && (
+                          <div className="text-xs text-muted-foreground">
+                            Loading chunks...
+                          </div>
+                        )}
+
+                        {!loadingChunks && chunks.length === 0 && (
+                          <div className="text-xs text-muted-foreground">
+                            No chunks extracted
+                          </div>
+                        )}
+
+                        {chunks.map((chunk) => (
+                          <div
+                            key={chunk.id}
+                            className="p-2 bg-background border rounded-lg relative group"
                           >
-                            Delete
-                          </button>
-                        </div>
-                      ))}
+                            <pre className="text-xs whitespace-pre-wrap text-foreground">
+                              {chunk.text}
+                            </pre>
+
+                            <button
+                              className="absolute top-2 right-2 hidden group-hover:inline-block text-[10px] bg-destructive text-white px-2 py-0.5 rounded"
+                              onClick={(e) => {
+                                e.stopPropagation();
+
+                                deleteChunk(file.id, chunk.id);
+                              }}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </td>
                 </tr>

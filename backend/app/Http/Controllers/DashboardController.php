@@ -27,15 +27,12 @@ class DashboardController extends Controller
             ->where("created_at", ">=", $since)
             ->count();
 
-        // สถานะคิว (ใช้ redis queue:default)
         $defaultQueueSize = 0;
         try {
             $defaultQueueSize = Redis::llen("queues:default");
         } catch (\Throwable $e) {
-            // ถ้า redis ล่ม ก็ไม่ต้องทำให้ API พัง
         }
 
-        // failed_jobs table (ถ้าคุณใช้ Horizon + failed jobs)
         $failedJobs = 0;
         if (Schema::hasTable("failed_jobs")) {
             $failedJobs = DB::table("failed_jobs")->count();
@@ -69,13 +66,11 @@ class DashboardController extends Controller
             ->orderBy("hour")
             ->get();
 
-        // map เป็น array [timestamp => count] ก่อน
         $byHour = [];
         foreach ($rows as $row) {
             $byHour[$row->hour] = (int) $row->cnt;
         }
 
-        // เติมช่องว่างชั่วโมงที่ไม่มี log ให้เป็น 0
         $points = [];
         $cursor = $since->copy()->startOfHour();
         $now = now()->startOfHour();
@@ -109,7 +104,6 @@ class DashboardController extends Controller
         $data = $logs->map(function (ApiLog $log) {
             $body = $log->request_body;
 
-            // ถ้ายังไม่ได้ cast เป็น array, เผื่อไว้
             if (is_string($body)) {
                 $decoded = json_decode($body, true);
                 if (json_last_error() === JSON_ERROR_NONE) {

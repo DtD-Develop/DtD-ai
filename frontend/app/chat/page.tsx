@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+
 import {
   chatApi,
   Conversation,
@@ -17,6 +18,8 @@ import { RatingStars } from "@/components/chat/rating-stars";
 type Mode = "test" | "train";
 
 export default function ChatPage() {
+
+  const { showToast } = useSimpleToast();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [activeConv, setActiveConv] = useState<ConversationWithMessages | null>(
@@ -264,6 +267,8 @@ export default function ChatPage() {
 
   /* Rating stars */
   function handleRate(message: Message, score: number) {
+
+
     chatApi
       .rateMessage(message.id, { score })
       .then((res) => {
@@ -271,12 +276,71 @@ export default function ChatPage() {
 
         if (!activeConv) return;
 
-        setActiveConv({
+        // update message in active conversation
+        const nextConv: ConversationWithMessages = {
           ...activeConv,
           messages: activeConv.messages.map((m) =>
             m.id === updated.id ? { ...m, ...updated } : m,
           ),
-        });
+        };
+
+        setActiveConv(nextConv);
+
+        // If we are in TRAIN mode, also send feedback to /api/train/feedback
+        if (currentMode === "train") {
+          const msgs = nextConv.messages;
+          const idx = msgs.findIndex((m) => m.id === message.id);
+
+          let question: string | null = null;
+          if (idx > 0) {
+            const prev = msgs[idx - 1];
+            if (prev.role === "user") {
+              question = prev.content;
+            }
+          }
+
+          const answer = message.content;
+
+
+              .sendTrainFeedback({
+                question,
+                answer,
+                score,
+
+                conversation_id: nextConv.id,
+                message_id: message.id,
+              })
+
+              .then(() => {
+
+                showToast("คำตอบนี้ถูกใช้ปรับปรุง Knowledge Base แล้ว", {
+                  variant: "success",
+                });
+
+                // mark message as trained in UI via meta flag
+                setActiveConv((conv) => {
+                  if (!conv) return conv;
+                  return {
+                    ...conv,
+                    messages: conv.messages.map((m) =>
+                      m.id === message.id
+                        ? {
+                            ...m,
+                            meta: {
+                              ...(m.meta || {}),
+                              trained: true,
+                            },
+                          }
+                        : m,
+                    ),
+                  };
+                });
+              })
+              .catch((err: any) => {
+                console.warn("Failed to send train feedback:", err?.message);
+              });
+          }
+        }
       })
       .catch((e) => alert(e.message ?? "Failed to rate."));
   }

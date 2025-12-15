@@ -156,7 +156,7 @@ export default function DashboardPage() {
               </tr>
             </thead>
             <tbody>
-              {recent.map((log) => (
+              {recent.slice(0, 15).map((log) => (
                 <tr key={log.id} className="border-b last:border-none">
                   <td className="py-2 whitespace-nowrap text-muted-foreground">
                     {new Date(log.created_at).toLocaleTimeString()}

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { FC, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -8,10 +8,10 @@ type Props = {
     content: string;
   };
   isStreaming?: boolean;
-  children?: React.ReactNode; // rating stars, etc.
+  children?: ReactNode; // rating stars, etc.
 };
 
-export function ChatBubble({ message, isStreaming, children }: Props) {
+export const ChatBubble: FC<Props> = ({ message, isStreaming, children }) => {
   const isAssistant = message.role === "assistant";
 
   const isLoading =
@@ -61,7 +61,7 @@ export function ChatBubble({ message, isStreaming, children }: Props) {
       </div>
     </div>
   );
-}
+};
 
 function TypingDots() {
   return (

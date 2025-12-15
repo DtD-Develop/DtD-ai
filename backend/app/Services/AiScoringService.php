@@ -6,6 +6,8 @@ use App\Services\OllamaService;
 
 class AiScoringService
 {
+    public function __construct(protected OllamaService $ollama) {}
+
     public function evaluate($question, $answer)
     {
         $prompt = "
@@ -21,7 +23,7 @@ class AiScoringService
         Answer: $answer
         ";
 
-        $result = app(OllamaService::class)->complete($prompt);
+        $result = $this->ollama->complete($prompt);
 
         $json = json_decode($result, true);
 

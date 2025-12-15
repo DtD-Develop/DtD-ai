@@ -1,5 +1,5 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY;
+const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "";
+const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "";
 
 export type ApiLog = {
   id: number;
@@ -35,7 +35,7 @@ export async function fetchLogs(params: {
   status_group?: string;
   from?: string;
   to?: string;
-}) {
+}): Promise<LogsResponse> {
   const qs = new URLSearchParams();
   if (params.page) qs.set("page", String(params.page));
   if (params.q) qs.set("q", params.q);
@@ -44,9 +44,11 @@ export async function fetchLogs(params: {
   if (params.from) qs.set("from", params.from);
   if (params.to) qs.set("to", params.to);
 
-  const res = await fetch(`${API_URL}/api/logs?${qs.toString()}`, {
+  const url = `${BASE_URL.replace(/\/+$/, "")}/api/logs?${qs.toString()}`;
+
+  const res = await fetch(url, {
     headers: {
-      "X-API-KEY": API_KEY ?? "",
+      "X-API-KEY": API_KEY,
     },
     cache: "no-store",
   });

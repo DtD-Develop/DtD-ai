@@ -184,7 +184,37 @@ class ChatController extends Controller
                 500,
             );
         }
-    }
+
+
+    /**
+     * Rate a message and optionally promote to KB if score is high (Train mode).
+     * POST /chat/messages/{message}/rate
+     * body: { score: int }
+     */
+     public function rate(Request $req, Message $message)
+     {
+         $validator = \Validator::make($req->all(), [
+             'score' => 'required|integer|min:0|max:10',
+         ]);
+         if ($validator->fails()) {
+             return response()->json([
+                 'message' => 'Validation failed',
+                 'errors'  => $validator->errors(),
+             ], 400);
+         }
+
+         $score = (int) $req->input('score', 0);
+         $message->score = $score;
+         $message->save();
+
+         return response()->json([
+             'message'  => 'Rated',
+             'score'    => $score,
+             'promoted' => false,
+         ]);
+     }
+
+
 
     /* ============================================================
      *  STREAMING (NDJSON)
@@ -309,14 +339,13 @@ class ChatController extends Controller
                     $score = null;
 
                     if ($mode === "train") {
-                        $score = $this->scorer->evaluate(
-                            $question,
-                            $finalAnswer,
-                        );
+                        $score = $this->scorer->evaluate($question, $finalAnswer);
                         $assistantMsg->score = $score;
                         $assistantMsg->saveQuietly();
 
-                        if ($score >= 4) {
+                        $threshold = (int) env("DTD_TRAIN_MIN_SCORE", 3);
+
+                        if ($score >= $threshold) {
                             $this->kb->storeText($finalAnswer, ["auto_train"]);
                         }
                     }

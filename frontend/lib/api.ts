@@ -191,6 +191,27 @@ export const chatApi = {
   ): Promise<{ message: Message }> {
     return ChatFetch(`/api/chat/messages/${messageId}/rate`, {
       method: "POST",
+
+      headers: { "Content-Type": "application/json" },
+
+      body: JSON.stringify(payload),
+    });
+  },
+
+  /* ---------------------------------------------------------
+   * TRAIN FEEDBACK (user Q/A rating -> KB)
+   * --------------------------------------------------------- */
+  async sendTrainFeedback(payload: {
+    question: string;
+    answer: string;
+    score: number;
+    user_id?: number | null;
+    conversation_id?: number | null;
+    message_id?: number | null;
+    meta?: any;
+  }): Promise<{ status: string; saved: number }> {
+    return ChatFetch("/api/train/feedback", {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });

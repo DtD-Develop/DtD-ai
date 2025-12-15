@@ -6,35 +6,34 @@ use App\Http\Controllers\QueryController;
 use App\Http\Controllers\Api\ApiLogController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\RagController;
+use App\Http\Controllers\LLMController;
+use App\Http\Controllers\TrainController;
 
+// health check
 Route::get("/health", function () {
     return response()->json(["status" => "ok"]);
 });
 
 Route::middleware(["api-key", "api-log"])->group(function () {
-    // KB upload / manage
+    // KB
     Route::post("/kb/upload", [KbController::class, "upload"]);
     Route::get("/kb/files", [KbController::class, "index"]);
     Route::get("/kb/files/{id}", [KbController::class, "show"]);
     Route::patch("/kb/files/{id}/tags", [KbController::class, "updateTags"]);
     Route::post("/kb/files/{id}/confirm", [KbController::class, "confirm"]);
     Route::delete("/kb/files/{id}", [KbController::class, "destroy"]);
-
-    // Get chunks
     Route::get("/kb/files/{id}/chunks", [KbController::class, "chunks"]);
-
-    // Delete chunk
     Route::delete("/kb/files/{id}/chunks/{chunkId}", [
         KbController::class,
         "deleteChunk",
     ]);
 
-    // public query
+    // query
     Route::post("/query", [QueryController::class, "query"]);
 
-    // API logs
+    // log + dashboard
     Route::get("/logs", [ApiLogController::class, "index"]);
-
     Route::get("/dashboard/overview", [DashboardController::class, "overview"]);
     Route::get("/dashboard/query-chart", [
         DashboardController::class,
@@ -45,6 +44,7 @@ Route::middleware(["api-key", "api-log"])->group(function () {
         "recentQueries",
     ]);
 
+    // chat
     Route::get("/chat/conversations", [ChatController::class, "index"]);
     Route::post("/chat/conversations", [
         ChatController::class,
@@ -62,7 +62,6 @@ Route::middleware(["api-key", "api-log"])->group(function () {
         ChatController::class,
         "destroyConversation",
     ]);
-
     Route::post("/chat/message", [ChatController::class, "message"]);
     Route::post("/chat/messages/{message}/rate", [
         ChatController::class,
@@ -76,4 +75,9 @@ Route::middleware(["api-key", "api-log"])->group(function () {
         ChatController::class,
         "summarizeConversation",
     ]);
+
+    // RAG + LLM + Train
+    Route::post("/rag/query", [RagController::class, "query"]);
+    Route::post("/llm/answer", [LLMController::class, "answer"]);
+    Route::post("/train/feedback", [TrainController::class, "feedback"]);
 });
