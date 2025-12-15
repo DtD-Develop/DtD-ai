@@ -266,14 +266,11 @@ export default function ChatPage() {
 
   /* Rating stars */
   function handleRate(message: Message, score: number) {
-
     chatApi
       .rateMessage(message.id, { score })
       .then((res) => {
         const updated = res.message;
-
         if (!activeConv) return;
-
         // update message in active conversation
         const nextConv: ConversationWithMessages = {
           ...activeConv,
@@ -298,43 +295,41 @@ export default function ChatPage() {
           }
 
           const answer = message.content;
-              chatApi.sendTrainFeedback({
-                question,
-                answer,
-                score,
+          chatApi
+            .sendTrainFeedback({
+              question,
+              answer,
+              score,
 
-                conversation_id: nextConv.id,
-                message_id: message.id,
-              })
-              .then(() => {
-
-                showToast("คำตอบนี้ถูกใช้ปรับปรุง Knowledge Base แล้ว", {
-                  variant: "success",
-                });
-
-                // mark message as trained in UI via meta flag
-                setActiveConv((conv) => {
-                  if (!conv) return conv;
-                  return {
-                    ...conv,
-                    messages: conv.messages.map((m) =>
-                      m.id === message.id
-                        ? {
-                            ...m,
-                            meta: {
-                              ...(m.meta || {}),
-                              trained: true,
-                            },
-                          }
-                        : m,
-                    ),
-                  };
-                });
-              })
-              .catch((err: any) => {
-                console.warn("Failed to send train feedback:", err?.message);
+              conversation_id: nextConv.id,
+              message_id: message.id,
+            })
+            .then(() => {
+              showToast("คำตอบนี้ถูกใช้ปรับปรุง Knowledge Base แล้ว", {
+                variant: "success",
               });
-          }
+              // mark message as trained in UI via meta flag
+              setActiveConv((conv) => {
+                if (!conv) return conv;
+                return {
+                  ...conv,
+                  messages: conv.messages.map((m) =>
+                    m.id === message.id
+                      ? {
+                          ...m,
+                          meta: {
+                            ...(m.meta || {}),
+                            trained: true,
+                          },
+                        }
+                      : m,
+                  ),
+                };
+              });
+            })
+            .catch((err: any) => {
+              console.warn("Failed to send train feedback:", err?.message);
+            });
         }
       })
       .catch((e) => alert(e.message ?? "Failed to rate."));
