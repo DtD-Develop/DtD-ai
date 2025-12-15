@@ -56,8 +56,18 @@ class ChatController extends Controller
 
     public function showConversation(Conversation $conversation)
     {
+        \Log::info("ShowConversation conversation", [
+            "id" => $conversation->id,
+            "messages_count" => $conversation->messages()->count(),
+        ]);
+
         $conversation->load([
             "messages" => fn($q) => $q->orderBy("created_at"),
+        ]);
+
+        \Log::info("ShowConversation loaded messages", [
+            "id" => $conversation->id,
+            "loaded_count" => $conversation->messages->count(),
         ]);
 
         return $conversation;
