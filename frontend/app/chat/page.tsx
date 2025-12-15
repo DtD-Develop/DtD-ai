@@ -18,7 +18,6 @@ import { RatingStars } from "@/components/chat/rating-stars";
 type Mode = "test" | "train";
 
 export default function ChatPage() {
-
   const { showToast } = useSimpleToast();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -268,7 +267,6 @@ export default function ChatPage() {
   /* Rating stars */
   function handleRate(message: Message, score: number) {
 
-
     chatApi
       .rateMessage(message.id, { score })
       .then((res) => {
@@ -300,9 +298,7 @@ export default function ChatPage() {
           }
 
           const answer = message.content;
-
-
-              .sendTrainFeedback({
+              chatApi.sendTrainFeedback({
                 question,
                 answer,
                 score,
@@ -310,7 +306,6 @@ export default function ChatPage() {
                 conversation_id: nextConv.id,
                 message_id: message.id,
               })
-
               .then(() => {
 
                 showToast("คำตอบนี้ถูกใช้ปรับปรุง Knowledge Base แล้ว", {
