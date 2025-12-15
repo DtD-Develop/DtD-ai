@@ -19,7 +19,10 @@ type Toast = {
 };
 
 type SimpleToastContextValue = {
-  showToast: (message: string, opts?: { variant?: ToastVariant; duration?: number }) => void;
+  showToast: (
+    message: string,
+    opts?: { variant?: ToastVariant; duration?: number },
+  ) => void;
 };
 
 const SimpleToastContext = createContext<SimpleToastContextValue | undefined>(

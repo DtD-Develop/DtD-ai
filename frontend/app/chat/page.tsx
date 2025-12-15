@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useSimpleToast } from "@/components/ui/simple-toast";
 
 import {
   chatApi,
