@@ -1,5 +1,6 @@
-DtD-ai/backend/app/Services/Ai/AiScoringService.php
-<?php namespace App\Services\Ai;
+<?php
+
+namespace App\Services\Ai;
 
 use App\Services\Ai\LLM\LLMRouter;
 

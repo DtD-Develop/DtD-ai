@@ -1,8 +1,6 @@
-DtD-ai/backend/config/ai.php#L1-120
 <?php
 
 return [
-
     /*
     |--------------------------------------------------------------------------
     | Default LLM Driver
@@ -18,7 +16,7 @@ return [
     |
     */
 
-    'driver' => env('LLM_DRIVER', 'local'),
+    "driver" => env("LLM_DRIVER", "local"),
 
     /*
     |--------------------------------------------------------------------------
@@ -36,9 +34,12 @@ return [
     |
     */
 
-    'local' => [
-        'base_url' => env('LOCAL_LLM_BASE_URL', env('OLLAMA_URL', 'http://ollama:11434')),
-        'model'    => env('LOCAL_LLM_MODEL', env('OLLAMA_MODEL', 'llama3.1:8b')),
+    "local" => [
+        "base_url" => env(
+            "LOCAL_LLM_BASE_URL",
+            env("OLLAMA_URL", "http://ollama:11434"),
+        ),
+        "model" => env("LOCAL_LLM_MODEL", env("OLLAMA_MODEL", "llama3.1:8b")),
     ],
 
     /*
@@ -57,13 +58,12 @@ return [
     |
     */
 
-    'gemini' => [
-        'api_key'  => env('GEMINI_API_KEY', ''),
-        'model'    => env('GEMINI_MODEL', 'gemini-1.5-pro'),
-        'endpoint' => env(
-            'GEMINI_ENDPOINT',
-            'https://generativelanguage.googleapis.com/v1beta/models'
+    "gemini" => [
+        "api_key" => env("GEMINI_API_KEY", ""),
+        "model" => env("GEMINI_MODEL", "gemini-1.5-pro"),
+        "endpoint" => env(
+            "GEMINI_ENDPOINT",
+            "https://generativelanguage.googleapis.com/v1beta/models",
         ),
     ],
-
 ];
