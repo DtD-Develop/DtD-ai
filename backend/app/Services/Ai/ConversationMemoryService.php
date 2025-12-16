@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Services;
+namespace App\Services\Ai;
 
 use App\Models\Conversation;
 use App\Models\Message;

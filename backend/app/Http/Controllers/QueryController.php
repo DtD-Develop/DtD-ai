@@ -86,7 +86,8 @@ class QueryController
         }
 
         $ctx = implode("\n---\n", $kbContexts);
-        $prompt = "ตอบตามข้อมูลจาก KB เท่านั้น ถ้าไม่มีข้อมูลตอบว่าไม่พบ\n\nKB:\n$ctx\n\nQuestion:\n$query";
+
+        $prompt = "Answer strictly based on the information from the Knowledge Base (KB). If the answer cannot be found in the KB, reply that it is not available.\n\nKB:\n$ctx\n\nQuestion:\n$query";
 
         $answer = $this->callLLM($ollamaUrl, $ollamaModel, $prompt);
 

@@ -1,32 +1,58 @@
-<?php
 
-namespace App\Jobs;
+<?php namespace App\Jobs;
 
 use App\Models\Message;
 use App\Models\KbFile;
-use App\Services\OllamaService;
+use App\Services\Ai\LLM\LLMRouter;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Str;
 
+/**
+ * PromoteChatMessageToKbJob
+ *
+ * This job takes an assistant message from a chat conversation,
+ * asks the LLM to convert the Q&A into a short knowledge article,
+ * saves it as a KB file, and triggers embedding.
+ *
+ * It now uses the generic LLMAdapter so the underlying model
+ * (local Ollama, Gemini, etc.) can be switched via configuration.
+ */
 class PromoteChatMessageToKbJob implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public function __construct(public int $messageId) {}
+    /**
+     * The ID of the assistant message to promote.
+     */
+    public int $messageId;
 
-    public function handle(OllamaService $ollama): void
+    /**
+     * Create a new job instance.
+     */
+    public function __construct(int $messageId)
+    {
+        $this->messageId = $messageId;
+    }
+
+    /**
+
+     * Handle the job using the generic LLMRouter.
+     */
+    public function handle(LLMRouter $llm): void
     {
         /** @var Message $msg */
-        $msg = Message::with([
-            "conversation",
-            "conversation.messages",
-        ])->findOrFail($this->messageId);
+        $msg = Message::with(["conversation", "conversation.messages"])->find(
+            $this->messageId,
+        );
 
-        // กันไม่ให้ train ซ้ำ
+        if (!$msg) {
+            return;
+        }
+
+        // Guard: only promote assistant messages that haven't been used for training yet
         if ($msg->is_training || $msg->role !== "assistant") {
             return;
         }
@@ -36,7 +62,7 @@ class PromoteChatMessageToKbJob implements ShouldQueue
             return;
         }
 
-        // หา user message ก่อนหน้าอันนี้
+        // Find the last user message before or at this assistant message
         $userMsg = $conversation
             ->messages()
             ->where("role", "user")
@@ -45,43 +71,66 @@ class PromoteChatMessageToKbJob implements ShouldQueue
             ->first();
 
         $question = $userMsg?->content ?? "";
-        $answer = $msg->content;
+        $answer = (string) $msg->content;
 
-        // สร้าง prompt ให้ LLM สรุปเป็น knowledge
+        if (trim($answer) === "" && trim($question) === "") {
+            return;
+        }
+
+        // Prompt the LLM to convert the Q&A into a KB-style article
+
         $prompt = <<<PROMPT
-        แปลง Q&A ด้านล่างให้เป็น "บทความความรู้" สั้น ๆ กระชับ เหมาะสำหรับเก็บใน Knowledge Base
 
-        เงื่อนไข:
-        - ไม่ต้องพูดถึงการถาม-ตอบ หรือคำว่าแชท
-        - ไม่ต้องใส่ชื่อคน
-        - เขียนเป็นเนื้อหาความรู้ตรง ๆ
-        - ถ้ามีขั้นตอนหรือรายการ ให้จัดรูปแบบเป็นข้อ ๆ อ่านง่าย
+        Transform the Q&A below into a short, concise knowledge article suitable for storing in a Knowledge Base.
 
-        [คำถาม]
+        Guidelines:
+        - Do not mention that this came from a chat or question-answer.
+        - Do not include any personal names.
+        - Write as a direct knowledge article in a neutral tone.
+        - If there are steps or lists, format them as clear bullet points or numbered steps for readability.
+
+        [Question]
         {$question}
 
-        [คำตอบ]
+        [Answer]
         {$answer}
         PROMPT;
 
-        $kbText = $ollama->generate($prompt);
+        $kbText = $llm->generate([
+            "prompt" => $prompt,
+
+            "metadata" => [
+                "job" => "PromoteChatMessageToKbJob",
+
+                "message_id" => $this->messageId,
+
+                "conversation_id" => $conversation->id,
+
+                "task" => "training_to_kb",
+                "source" => "PromoteChatMessageToKbJob",
+            ],
+        ]);
 
         if (!is_string($kbText) || trim($kbText) === "") {
             return;
         }
 
-        $relativeDir = config("dtd.chat_train_dir", "kb-chat-train");
-        $storagePath = $relativeDir . "/chat_" . $msg->id . ".txt";
+        $kbText = trim($kbText);
 
-        // เซฟไฟล์ลง storage/app/...
-        $fullPathDir = storage_path("app/" . $relativeDir);
-        if (!is_dir($fullPathDir)) {
-            @mkdir($fullPathDir, 0775, true);
+        // Determine storage path under storage/app/...
+        $relativeDir = config("dtd.chat_train_dir", "kb-chat-train");
+        $storageDir = storage_path("app/" . $relativeDir);
+
+        if (!is_dir($storageDir)) {
+            @mkdir($storageDir, 0775, true);
         }
 
-        file_put_contents(storage_path("app/" . $storagePath), $kbText);
+        $storagePath = $relativeDir . "/chat_" . $msg->id . ".txt";
+        $fullPath = storage_path("app/" . $storagePath);
 
-        // สร้าง KbFile record
+        file_put_contents($fullPath, $kbText);
+
+        // Create KbFile record for this promoted content
         $kb = KbFile::create([
             "source" => "chat_train",
             "filename" => basename($storagePath),
@@ -90,20 +139,16 @@ class PromoteChatMessageToKbJob implements ShouldQueue
             "mime_type" => "text/plain",
             "size_bytes" => strlen($kbText),
             "storage_path" => $storagePath,
-            "status" => "embedding", // หรือจะใช้ 'uploaded' + ParseKbFileJob ก็ได้
+            "status" => "embedding", // or 'uploaded' if you want a separate parse step
             "progress" => 80,
             "auto_tags" => null,
             "tags" => null,
         ]);
 
-        // ถ้าคุณอยากใช้ pipeline เดิมแบบเต็มๆ:
-        // dispatch(new ParseKbFileJob($kb->id));
-        // แล้วให้ frontend มากด confirm embed เอง
-        //
-        // แต่ใน Train เราเอา embed เลยก็ได้:
+        // Trigger embedding pipeline immediately (same behavior as before)
         dispatch(new \App\Jobs\EmbedKbFileJob($kb->id));
 
-        // mark ว่า message นี้ถูกใช้ train แล้ว
+        // Mark that this message has been used for training / promotion
         $msg->is_training = true;
         $msg->save();
     }

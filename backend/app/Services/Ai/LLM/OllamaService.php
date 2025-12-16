@@ -1,8 +1,9 @@
 <?php
 
-namespace App\Services;
+namespace App\Services\Ai\LLM;
 
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class OllamaService
 {
@@ -11,36 +12,51 @@ class OllamaService
 
     public function __construct()
     {
-        $this->host = rtrim(env("OLLAMA_URL", "http://ollama:11434"), "/");
-        $this->model = env("OLLAMA_MODEL", "llama3.1:8b");
+        $this->host = rtrim(
+            (string) env("OLLAMA_URL", "http://ollama:11434"),
+            "/",
+        );
+        $this->model = (string) env("OLLAMA_MODEL", "llama3.1:8b");
     }
 
     /* ---------------------------------------------------------
      * NON-STREAMING GENERATION
      * --------------------------------------------------------- */
+
+    /**
+     * Call Ollama /api/generate with stream=false and return full response text.
+     */
     public function generate(string $prompt): string
     {
-        $res = Http::timeout(60)->post("{$this->host}/api/generate", [
+        $response = Http::timeout(60)->post("{$this->host}/api/generate", [
             "model" => $this->model,
             "prompt" => $prompt,
             "stream" => false,
         ]);
 
-        if ($res->failed()) {
-            \Log::error("Ollama generate() failed", [
-                "status" => $res->status(),
-                "body" => $res->body(),
+        if ($response->failed()) {
+            Log::error("Ollama generate() failed", [
+                "status" => $response->status(),
+                "body" => $response->body(),
             ]);
+
             return "";
         }
 
-        return $res->json("response") ?? "";
+        return $response->json("response") ?? "";
     }
 
     /* ---------------------------------------------------------
      * STREAM GENERATION (NDJSON)
-     * $callback receives partial tokens: fn(string $chunk) {}
+     * $callback receives partial tokens: fn(string $chunk): void
      * --------------------------------------------------------- */
+
+    /**
+     * Stream tokens from Ollama /api/generate (NDJSON) and invoke callback with each chunk.
+     *
+     * @param  string   $prompt
+     * @param  callable $callback  fn(string $chunk): void
+     */
     public function streamGenerate(string $prompt, callable $callback): void
     {
         $response = Http::withHeaders(["Accept" => "application/json"])
@@ -53,10 +69,11 @@ class OllamaService
             ]);
 
         if ($response->failed()) {
-            \Log::error("Ollama streamGenerate() HTTP failed", [
+            Log::error("Ollama streamGenerate() HTTP failed", [
                 "status" => $response->status(),
                 "body" => $response->body(),
             ]);
+
             return;
         }
 
@@ -73,12 +90,13 @@ class OllamaService
 
             $buffer .= $chunk;
 
-            // NDJSON จะแบ่งด้วย newline
+            // NDJSON: each line is a JSON object
             $lines = explode("\n", $buffer);
-            $buffer = array_pop($lines); // เก็บ remainder เอาไว้ยังไม่สมบูรณ์
+            $buffer = array_pop($lines); // keep remainder
 
             foreach ($lines as $line) {
                 $line = trim($line);
+
                 if ($line === "") {
                     continue;
                 }
@@ -86,16 +104,18 @@ class OllamaService
                 $json = json_decode($line, true);
 
                 if (!is_array($json)) {
-                    \Log::warning("Invalid JSON in stream chunk: " . $line);
+                    Log::warning("Invalid JSON in Ollama stream chunk", [
+                        "chunk" => $line,
+                    ]);
                     continue;
                 }
 
-                // Ollama ส่ง {"response":"...", "done":false}
+                // Ollama sends {"response":"...", "done":false} ... {"done":true}
                 if (
                     isset($json["response"]) &&
                     ($json["done"] ?? false) === false
                 ) {
-                    $callback($json["response"]);
+                    $callback((string) $json["response"]);
                 }
 
                 if (($json["done"] ?? false) === true) {
@@ -108,21 +128,31 @@ class OllamaService
     /* ---------------------------------------------------------
      * EMBEDDINGS
      * --------------------------------------------------------- */
+
+    /**
+     * Get embedding vector for a given text from Ollama /api/embeddings.
+     *
+     * @return array<int,float>
+     */
     public function getEmbedding(string $text): array
     {
-        $res = Http::timeout(60)->post("{$this->host}/api/embeddings", [
+        $response = Http::timeout(60)->post("{$this->host}/api/embeddings", [
             "model" => $this->model,
             "prompt" => $text,
         ]);
 
-        if ($res->failed()) {
-            \Log::error("Ollama embedding failed", [
-                "status" => $res->status(),
-                "body" => $res->body(),
+        if ($response->failed()) {
+            Log::error("Ollama embedding() failed", [
+                "status" => $response->status(),
+                "body" => $response->body(),
             ]);
+
             return [];
         }
 
-        return $res->json("embedding") ?? [];
+        /** @var array<int,float>|null $embedding */
+        $embedding = $response->json("embedding");
+
+        return is_array($embedding) ? $embedding : [];
     }
 }

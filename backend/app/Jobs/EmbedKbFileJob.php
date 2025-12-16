@@ -4,7 +4,6 @@ namespace App\Jobs;
 
 use App\Models\KbFile;
 use App\Models\KbChunk;
-use App\Services\OllamaService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Queue\SerializesModels;

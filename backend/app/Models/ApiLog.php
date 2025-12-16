@@ -16,6 +16,8 @@ class ApiLog extends Model
         "method",
         "status_code",
         "latency_ms",
+        "llm_driver",
+        "llm_task",
         "ip",
         "api_key",
         "request_body",
@@ -29,5 +31,7 @@ class ApiLog extends Model
         "request_body" => "array",
         "response_body" => "array",
         "created_at" => "datetime",
+        "llm_driver" => "string",
+        "llm_task" => "string",
     ];
 }

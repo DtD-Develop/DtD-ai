@@ -6,10 +6,10 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use App\Models\Conversation;
 use App\Models\Message;
-use App\Services\QueryService;
-use App\Services\OllamaService;
-use App\Services\AiScoringService;
-use App\Services\KnowledgeStoreService;
+use App\Services\Ai\QueryService;
+use App\Services\Ai\LLM\OllamaService;
+use App\Services\Ai\AiScoringService;
+use App\Services\Ai\KnowledgeStoreService;
 use App\Jobs\GenerateConversationTitleJob;
 use App\Jobs\GenerateConversationSummaryJob;
 
@@ -20,16 +20,20 @@ class ChatController extends Controller
     protected AiScoringService $scorer;
     protected KnowledgeStoreService $kb;
 
+    protected ConversationMemoryService $memory;
+
     public function __construct(
         QueryService $query,
         OllamaService $llm,
         AiScoringService $scorer,
         KnowledgeStoreService $kb,
+        ConversationMemoryService $memory,
     ) {
         $this->query = $query;
         $this->llm = $llm;
         $this->scorer = $scorer;
         $this->kb = $kb;
+        $this->memory = $memory;
     }
 
     /* ============================================================
@@ -118,6 +122,7 @@ class ChatController extends Controller
 
     /* ============================================================
      *  NON-STREAMING ENDPOINT
+     *  (Refactored to use QueryService::answer + LLMRouter-based RAG)
      * ============================================================ */
     public function message(Request $req)
     {
@@ -143,6 +148,7 @@ class ChatController extends Controller
             $mode = $req->mode ?? "test";
             $question = $req->message;
 
+            // 1) Resolve or create conversation
             if (!$req->conversation_id) {
                 $conversation = Conversation::create([
                     "title" => "",
@@ -155,6 +161,7 @@ class ChatController extends Controller
                 $conversation = Conversation::find($conversationId);
             }
 
+            // 2) Create user message
             $userMsg = Message::create([
                 "conversation_id" => $conversationId,
                 "role" => "user",
@@ -162,19 +169,49 @@ class ChatController extends Controller
                 "is_training" => $mode === "train",
             ]);
 
-            $contexts = $this->query->searchKB($question, 4);
-            $prompt = $this->buildRagPrompt($question, $contexts);
+            // 2.1) Build memory-based system prompt (if any) for this conversation
+            $systemPrompt = null;
+            if ($conversation) {
+                $systemPrompt = $this->memory->buildMemoryPrompt($conversation);
+            }
 
-            $answer = $this->llm->generate($prompt);
-            if (!is_string($answer) || trim($answer) === "") {
+            // 3) Use QueryService::answer() to perform RAG via LLMRouter
+            $ragResult = $this->query->answer([
+                "query" => $question,
+                "system_prompt" => $systemPrompt,
+            ]);
+
+            $answer = (string) ($ragResult["text"] ?? "");
+            $kbHits = $ragResult["kb_hits"] ?? [];
+            $ragPrompt = (string) ($ragResult["rag_prompt"] ?? "");
+            $usedKb = (bool) ($ragResult["used_kb"] ?? false);
+
+            if (trim($answer) === "") {
                 $answer = "I’m sorry, I cannot answer right now.";
             }
 
+            // 4) Score in TRAIN mode
             $score = null;
             if ($mode === "train") {
                 $score = $this->scorer->evaluate($question, $answer);
             }
 
+            // 4.1) Update long-term memory from this user/assistant exchange
+            if ($conversation) {
+                $assistantPreview = new Message([
+                    "conversation_id" => $conversationId,
+                    "role" => "assistant",
+                    "content" => $answer,
+                    "is_training" => $mode === "train",
+                ]);
+                $this->memory->updateMemoryFromExchange(
+                    $conversation,
+                    $userMsg,
+                    $assistantPreview,
+                );
+            }
+
+            // 5) Create assistant message with meta including RAG info
             $assistantMsg = Message::create([
                 "conversation_id" => $conversationId,
                 "role" => "assistant",
@@ -183,15 +220,22 @@ class ChatController extends Controller
                 "is_training" => $mode === "train",
                 "meta" => [
                     "question" => $question,
-                    "rag_context" => $contexts,
-                    "rag_prompt" => $prompt,
+                    "rag_context" => $kbHits,
+                    "rag_prompt" => $ragPrompt,
+                    "used_kb" => $usedKb,
                 ],
             ]);
 
-            if ($mode === "train" && $score >= 4) {
-                $this->kb->storeText($answer, ["auto_train"]);
+            // 6) Auto-train into KB when in TRAIN mode and score is high
+            if ($mode === "train" && $score !== null) {
+                $threshold = (int) env("DTD_TRAIN_MIN_SCORE", 3);
+
+                if ($score >= $threshold) {
+                    $this->kb->storeText($answer, ["auto_train"]);
+                }
             }
 
+            // 7) Dispatch background jobs for title & summary
             GenerateConversationTitleJob::dispatch($conversationId);
             GenerateConversationSummaryJob::dispatch($conversationId);
 
@@ -201,8 +245,9 @@ class ChatController extends Controller
                 "user_message_id" => $userMsg->id,
                 "assistant_message_id" => $assistantMsg->id,
                 "answer" => $answer,
-                "kb_hits" => $contexts,
+                "kb_hits" => $kbHits,
                 "score" => $score,
+                "used_kb" => $usedKb,
             ]);
         } catch (\Throwable $e) {
             \Log::error("ChatController@message exception", [

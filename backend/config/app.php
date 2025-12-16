@@ -100,7 +100,24 @@ return [
 
     "previous_keys" => [
         ...array_filter(explode(",", env("APP_PREVIOUS_KEYS", ""))),
+
         App\Providers\AppServiceProvider::class,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Application Service Providers
+    |--------------------------------------------------------------------------
+    |
+    | Here you may specify the service providers for your application.
+    | We register the AI-specific service provider so that the AI Platform
+    | bindings (e.g. LLMAdapter) are available application-wide.
+    |
+    */
+
+    "providers" => [
+        App\Providers\AppServiceProvider::class,
+        App\Providers\AiServiceProvider::class,
     ],
 
     /*

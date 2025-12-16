@@ -18,6 +18,28 @@ import { RatingStars } from "@/components/chat/rating-stars";
 
 type Mode = "test" | "train";
 
+/**
+ * Safely extract RAG metadata from a message.meta object.
+ * Backend (ChatController) stores:
+ * - meta.rag_context: raw KB hits (array)
+ * - meta.rag_prompt: RAG prompt string
+ * - meta.used_kb: boolean
+ */
+function getRagMeta(meta: any | null | undefined) {
+  if (!meta || typeof meta !== "object") return null;
+
+  const usedKb = Boolean(meta.used_kb);
+  const kbHits = Array.isArray(meta.rag_context) ? meta.rag_context : [];
+  const ragPrompt =
+    typeof meta.rag_prompt === "string" ? (meta.rag_prompt as string) : "";
+
+  return {
+    usedKb,
+    kbHits,
+    ragPrompt,
+  };
+}
+
 export default function ChatPage() {
   const { showToast } = useSimpleToast();
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -393,21 +415,89 @@ export default function ChatPage() {
             </div>
           )}
 
-          {activeConv?.messages?.map((m) => (
-            <ChatBubble
-              key={m.id}
-              message={m}
-              isStreaming={m.id === streamingMsgId}
-            >
-              {m.role === "assistant" && currentMode === "train" && (
-                <RatingStars
-                  initialScore={m.score}
-                  isTrained={m.is_training}
-                  onRate={(score) => handleRate(m, score)}
-                />
-              )}
-            </ChatBubble>
-          ))}
+          {activeConv?.messages?.map((m) => {
+            const rag = getRagMeta(m.meta);
+
+            return (
+              <ChatBubble
+                key={m.id}
+                message={m}
+                isStreaming={m.id === streamingMsgId}
+              >
+                {/* Rating (Train mode) */}
+                {m.role === "assistant" && currentMode === "train" && (
+                  <RatingStars
+                    initialScore={m.score}
+                    isTrained={m.is_training}
+                    onRate={(score) => handleRate(m, score)}
+                  />
+                )}
+
+                {/* RAG metadata (KB usage, score, simple sources) */}
+                {m.role === "assistant" && rag && (
+                  <div className="mt-2 space-y-1 text-[11px] text-muted-foreground border-t pt-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span>
+                        KB used:{" "}
+                        <span className="font-mono">
+                          {rag.usedKb ? "yes" : "no"}
+                        </span>
+                      </span>
+                      {typeof m.score === "number" && (
+                        <span>
+                          Score: <span className="font-mono">{m.score}</span>
+                        </span>
+                      )}
+                      {Array.isArray(rag.kbHits) && rag.kbHits.length > 0 && (
+                        <span>
+                          KB hits:{" "}
+                          <span className="font-mono">{rag.kbHits.length}</span>
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Show first few sources (filename + snippet) */}
+                    {Array.isArray(rag.kbHits) && rag.kbHits.length > 0 && (
+                      <div className="space-y-1">
+                        {rag.kbHits.slice(0, 2).map((hit: any, idx: number) => {
+                          const payload =
+                            (hit && typeof hit === "object" && hit.payload) ||
+                            {};
+                          const filename =
+                            payload.filename ||
+                            payload.source ||
+                            `Snippet ${idx + 1}`;
+                          const text =
+                            (payload.text as string | undefined) ?? "";
+
+                          return (
+                            <div
+                              key={hit.id ?? idx}
+                              className="rounded-md bg-muted/40 px-2 py-1"
+                            >
+                              <div className="flex justify-between gap-2">
+                                <span className="truncate max-w-[160px]">
+                                  {filename}
+                                </span>
+                                {typeof hit.score === "number" && (
+                                  <span className="font-mono">
+                                    {hit.score.toFixed(3)}
+                                  </span>
+                                )}
+                              </div>
+                              {text && (
+                                <p className="mt-0.5 line-clamp-2">{text}</p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </ChatBubble>
+            );
+          })}
 
           <div ref={messagesEndRef} />
         </div>

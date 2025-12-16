@@ -23,7 +23,8 @@ class DashboardController extends Controller
         $kbReady = KbFile::where("status", "ready")->count();
         $kbChunks = KbChunk::count();
 
-        $queries24h = ApiLog::where("endpoint", "/api/query")
+        // Count AI chat calls (new AI Platform endpoint)
+        $queries24h = ApiLog::where("endpoint", "api/ai/chat")
             ->where("created_at", ">=", $since)
             ->count();
 
@@ -60,7 +61,8 @@ class DashboardController extends Controller
             DB::raw("DATE_FORMAT(created_at, '%Y-%m-%d %H:00:00') as hour"),
             DB::raw("COUNT(*) as cnt"),
         )
-            ->where("endpoint", "/api/query")
+            // Use the new AI chat endpoint for chart data
+            ->where("endpoint", "api/ai/chat")
             ->where("created_at", ">=", $since)
             ->groupBy("hour")
             ->orderBy("hour")
@@ -96,7 +98,8 @@ class DashboardController extends Controller
      */
     public function recentQueries()
     {
-        $logs = ApiLog::whereIn("endpoint", ["/api/query", "/api/chat/test"])
+        // Use the new AI chat endpoint for recent queries
+        $logs = ApiLog::whereIn("endpoint", ["api/ai/chat"])
             ->orderByDesc("created_at")
             ->limit(20)
             ->get();
@@ -113,7 +116,27 @@ class DashboardController extends Controller
                 }
             }
 
-            $q = $body["query"] ?? ($body["message"] ?? null);
+            // For /api/ai/chat, prefer "question"; fallback to last user message in "messages"
+            $q = $body["question"] ?? null;
+
+            if (
+                !$q &&
+                isset($body["messages"]) &&
+                is_array($body["messages"])
+            ) {
+                $userMessages = array_values(
+                    array_filter(
+                        $body["messages"],
+                        fn($m) => ($m["role"] ?? "") === "user",
+                    ),
+                );
+
+                if (!empty($userMessages)) {
+                    $lastUser = end($userMessages);
+                    $q = $lastUser["content"] ?? null;
+                }
+            }
+
             $preview = $q ? mb_strimwidth($q, 0, 150, "…") : null;
 
             return [
