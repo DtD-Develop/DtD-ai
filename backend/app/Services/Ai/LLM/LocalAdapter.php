@@ -1,4 +1,3 @@
-DtD-ai\backend\app\Services\Ai\LLM\LocalAdapter.php
 <?php
 
 namespace App\Services\Ai\LLM;
@@ -16,10 +15,7 @@ use App\Services\Ai\LLM\OllamaService;
  */
 class LocalAdapter implements LLMAdapter
 {
-    public function __construct(
-        protected OllamaService $ollama,
-    ) {
-    }
+    public function __construct(protected OllamaService $ollama) {}
 
     /**
      * Generate a completion using the local Ollama model.
@@ -52,12 +48,12 @@ class LocalAdapter implements LLMAdapter
      */
     protected function buildPrompt(array $payload): string
     {
-        $userPrompt = (string) ($payload['prompt'] ?? '');
-        $systemPrompt = isset($payload['system_prompt'])
-            ? (string) $payload['system_prompt']
-            : '';
+        $userPrompt = (string) ($payload["prompt"] ?? "");
+        $systemPrompt = isset($payload["system_prompt"])
+            ? (string) $payload["system_prompt"]
+            : "";
 
-        if ($systemPrompt !== '') {
+        if ($systemPrompt !== "") {
             return $systemPrompt . "\n\n" . $userPrompt;
         }
 

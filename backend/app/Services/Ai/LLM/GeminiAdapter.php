@@ -1,4 +1,3 @@
-DtD-ai/backend/app/Services/Ai/LLM/GeminiAdapter.php
 <?php
 
 namespace App\Services\Ai\LLM;
@@ -27,11 +26,11 @@ class GeminiAdapter implements LLMAdapter
     public function __construct()
     {
         // These should be configured in config/ai.php and .env
-        $this->apiKey = (string) config('ai.gemini.api_key', '');
-        $this->model = (string) config('ai.gemini.model', 'gemini-1.5-pro');
+        $this->apiKey = (string) config("ai.gemini.api_key", "");
+        $this->model = (string) config("ai.gemini.model", "gemini-1.5-pro");
         $this->endpoint = (string) config(
-            'ai.gemini.endpoint',
-            'https://generativelanguage.googleapis.com/v1beta/models',
+            "ai.gemini.endpoint",
+            "https://generativelanguage.googleapis.com/v1beta/models",
         );
     }
 
@@ -55,27 +54,27 @@ class GeminiAdapter implements LLMAdapter
      */
     public function generate(array $payload): string
     {
-        $prompt = (string) ($payload['prompt'] ?? '');
-        $systemPrompt = isset($payload['system_prompt'])
-            ? (string) $payload['system_prompt']
-            : '';
+        $prompt = (string) ($payload["prompt"] ?? "");
+        $systemPrompt = isset($payload["system_prompt"])
+            ? (string) $payload["system_prompt"]
+            : "";
 
-        $temperature = isset($payload['temperature'])
-            ? (float) $payload['temperature']
+        $temperature = isset($payload["temperature"])
+            ? (float) $payload["temperature"]
             : 0.2;
 
-        $maxTokens = isset($payload['max_tokens'])
-            ? (int) $payload['max_tokens']
+        $maxTokens = isset($payload["max_tokens"])
+            ? (int) $payload["max_tokens"]
             : 512;
 
-        if ($prompt === '') {
-            return '';
+        if ($prompt === "") {
+            return "";
         }
 
-        if ($this->apiKey === '') {
-            Log::warning('GeminiAdapter: GEMINI_API_KEY is empty');
+        if ($this->apiKey === "") {
+            Log::warning("GeminiAdapter: GEMINI_API_KEY is empty");
 
-            return '';
+            return "";
         }
 
         // Build full prompt text (system + user) as a simple fallback.
@@ -83,36 +82,40 @@ class GeminiAdapter implements LLMAdapter
 
         try {
             // Example REST call layout (adjust to actual Gemini API)
-            $url = rtrim($this->endpoint, '/') . '/' . $this->model . ':generateContent';
+            $url =
+                rtrim($this->endpoint, "/") .
+                "/" .
+                $this->model .
+                ":generateContent";
 
             $body = [
-                'contents' => [
+                "contents" => [
                     [
-                        'parts' => [
+                        "parts" => [
                             [
-                                'text' => $fullPrompt,
+                                "text" => $fullPrompt,
                             ],
                         ],
                     ],
                 ],
-                'generationConfig' => [
-                    'temperature' => $temperature,
-                    'maxOutputTokens' => $maxTokens,
+                "generationConfig" => [
+                    "temperature" => $temperature,
+                    "maxOutputTokens" => $maxTokens,
                 ],
             ];
 
             $response = Http::withHeaders([
-                'Content-Type'  => 'application/json',
-                'x-goog-api-key' => $this->apiKey,
+                "Content-Type" => "application/json",
+                "x-goog-api-key" => $this->apiKey,
             ])->post($url, $body);
 
             if ($response->failed()) {
-                Log::error('GeminiAdapter: HTTP request failed', [
-                    'status' => $response->status(),
-                    'body'   => $response->body(),
+                Log::error("GeminiAdapter: HTTP request failed", [
+                    "status" => $response->status(),
+                    "body" => $response->body(),
                 ]);
 
-                return '';
+                return "";
             }
 
             $data = $response->json();
@@ -127,22 +130,24 @@ class GeminiAdapter implements LLMAdapter
              */
             $text = $this->extractTextFromResponse($data);
 
-            return $text ?? '';
+            return $text ?? "";
         } catch (\Throwable $e) {
-            Log::error('GeminiAdapter: exception during request', [
-                'error' => $e->getMessage(),
+            Log::error("GeminiAdapter: exception during request", [
+                "error" => $e->getMessage(),
             ]);
 
-            return '';
+            return "";
         }
     }
 
     /**
      * Build final prompt from system and user prompts.
      */
-    protected function buildPrompt(string $systemPrompt, string $userPrompt): string
-    {
-        if ($systemPrompt !== '') {
+    protected function buildPrompt(
+        string $systemPrompt,
+        string $userPrompt,
+    ): string {
+        if ($systemPrompt !== "") {
             return $systemPrompt . "\n\n" . $userPrompt;
         }
 
@@ -163,7 +168,7 @@ class GeminiAdapter implements LLMAdapter
 
         // This is a common structure in many Gemini examples, but you MUST
         // confirm against the actual API docs for your chosen version.
-        $candidates = $data['candidates'] ?? null;
+        $candidates = $data["candidates"] ?? null;
 
         if (!is_array($candidates) || empty($candidates)) {
             return null;
@@ -175,13 +180,13 @@ class GeminiAdapter implements LLMAdapter
             return null;
         }
 
-        $content = $first['content'] ?? null;
+        $content = $first["content"] ?? null;
 
         if (!is_array($content)) {
             return null;
         }
 
-        $parts = $content['parts'] ?? null;
+        $parts = $content["parts"] ?? null;
 
         if (!is_array($parts) || empty($parts)) {
             return null;
@@ -189,8 +194,8 @@ class GeminiAdapter implements LLMAdapter
 
         $firstPart = $parts[0] ?? null;
 
-        if (is_array($firstPart) && isset($firstPart['text'])) {
-            return (string) $firstPart['text'];
+        if (is_array($firstPart) && isset($firstPart["text"])) {
+            return (string) $firstPart["text"];
         }
 
         return null;
