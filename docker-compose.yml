@@ -53,9 +53,11 @@ services:
 
   horizon:
     container_name: horizon
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.horizon
+    image: backend
+    command: php artisan horizon
+    depends_on:
+      - backend
+      - redis
     environment:
       DB_HOST: mysql
       DB_PORT: 3306
@@ -63,8 +65,6 @@ services:
       DB_USERNAME: root
       DB_PASSWORD: root
       REDIS_HOST: redis
-    depends_on:
-      - backend
     networks:
       - app-network
 
@@ -150,26 +150,6 @@ services:
       - "5678:5678"
     volumes:
       - ./n8n_data:/home/node/.n8n
-    networks:
-      - app-network
-
-  queue:
-    container_name: queue
-    build:
-      context: ./backend
-    command: php artisan queue:work --sleep=3 --tries=3
-    volumes:
-      - ./backend:/var/www/html
-    environment:
-      DB_HOST: mysql
-      DB_PORT: 3306
-      DB_DATABASE: dtdai
-      DB_USERNAME: root
-      DB_PASSWORD: root
-      REDIS_HOST: redis
-    depends_on:
-      - backend
-      - redis
     networks:
       - app-network
 

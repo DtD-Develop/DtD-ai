@@ -2,16 +2,13 @@
 set -e
 cd /var/www/html
 
-# ❌ ห้ามสร้างหรือแก้ .env ใน container
 if [ ! -f ".env" ]; then
-  echo ".env not found, exiting"
+  echo ".env not found"
   exit 1
 fi
 
-composer install --no-dev --optimize-autoloader
-
+php artisan key:generate --force || true
 php artisan migrate --force || true
-
-chown -R www-data:www-data storage bootstrap/cache
+php artisan package:discover || true
 
 exec php-fpm

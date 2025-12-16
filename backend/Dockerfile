@@ -10,8 +10,7 @@ WORKDIR /var/www/html
 COPY . .
 
 # Prevent artisan auto-run during composer install
-RUN sed 's_@php artisan package:discover_/bin/true_;' -i composer.json \
-    && composer clear-cache \
+RUN composer clear-cache \
     && mkdir -p storage/framework/sessions storage/framework/views storage/framework/cache \
     && chmod -R 775 /var/www/html/storage \
     && chmod -R 775 storage bootstrap/cache \
